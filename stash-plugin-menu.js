@@ -67,7 +67,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.1.1', register, refresh };
+  window.StashPluginMenu = { version: '0.1.2', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -253,6 +253,15 @@
     registerNav();
     new MutationObserver(syncPage).observe(document.body, { childList: true, subtree: true });
     window.addEventListener('popstate', syncPage);
+    // Client-side navigation (a click in Stash's own router) changes the address without touching the DOM we watch: follow pushState / replaceState too.
+    ['pushState', 'replaceState'].forEach((fn) => {
+      const original = window.history[fn];
+      window.history[fn] = function patched(...args) {
+        const result = original.apply(this, args);
+        setTimeout(syncPage, 0);
+        return result;
+      };
+    });
     syncPage();
     loadFromStash();
   }
