@@ -4,7 +4,7 @@
  *  - Entries come from two places: plugins that register themselves (see "For plugin authors" in the README: push {id, label, path, badge?}
  *    to window.__stashPluginMenuQueue or call window.StashPluginMenu.register -- works whichever plugin loads first) and the entries the user
  *    adds on the page /plugins/stash-plugin-menu (stored as JSON in this plugin's own Stash setting `pages`).
- *  - No entries: the icon links to the editor page. One entry: a plain link. Several: a drop-down, "Edit menu..." at the bottom.
+ *  - No entries: the icon links to the editor page. Otherwise a drop-down with the entries and "Edit menu..." at the bottom.
  *  - A registered `badge: () => boolean` puts a dot on the icon while it returns true (call window.StashPluginMenu.refresh() when it changes).
  */
 (function () {
@@ -67,7 +67,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.1.0', register, refresh };
+  window.StashPluginMenu = { version: '0.1.1', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -140,7 +140,7 @@
         const link = (to, title) => React.createElement(NavLink, { className: 'nav-utility spm-menu', to, isActive: () => here },
           React.createElement(Button, { className: 'minimal d-flex align-items-center h-100', title }, ...glyph(busy)));
         if (!entries.length) return link(PAGE_PATH, 'Plugin menu: add your plugin pages');
-        if (entries.length === 1 || !Dropdown) return link(entries[0].path, entries[0].label);
+        if (!Dropdown) return link(entries[0].path, entries[0].label);  // (no drop-down component: at least the first page)
         const item = (key, label, to) => React.createElement(Dropdown.Item, { key, as: Link, to }, label);
         return React.createElement(Dropdown, { className: `nav-utility spm-menu${here ? ' active' : ''}`, alignRight: true },
           React.createElement(Dropdown.Toggle, { as: Button, className: 'minimal d-flex align-items-center h-100', title: 'Plugins' }, ...glyph(busy)),
