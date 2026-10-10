@@ -1,0 +1,17 @@
+name: Plugin Menu
+description: One icon in Stash's top bar (next to Statistics) with a drop-down of your plugin pages -- instead of one top-bar entry per plugin.
+version: 0.1.0
+url: https://github.com/northwindlab/stash-plugin-menu
+
+settings:
+  pages:
+    displayName: Menu entries (JSON)
+    description: >-
+      Managed on the page /plugins/stash-plugin-menu (icon menu > Edit menu...). A JSON list of {label, path}; edit it there, not here.
+    type: STRING
+
+ui:
+  javascript:
+    - stash-plugin-menu.js
+  css:
+    - stash-plugin-menu.css

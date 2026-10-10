@@ -1,0 +1,12 @@
+/* Plugin Menu: the icon among Stash's utility icons -- no drop-down caret, a dot when a plugin reports activity. */
+.spm-menu { position: relative; }
+.spm-menu .dropdown-toggle::after { display: none; }
+.spm-menu .btn { position: relative; }
+.spm-dot { position: absolute; top: 0.35em; right: 0.2em; width: 0.55em; height: 0.55em; border-radius: 50%; background: #f5a623; }
+.spm-dot[hidden] { display: none; }
+.spm-page { max-width: 46rem; margin: 1rem auto; }
+.spm-page h2 { margin-bottom: 0.5rem; }
+.spm-page .spm-hint { opacity: 0.75; font-size: 0.9em; margin: 0.25rem 0 0.75rem; }
+.spm-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0; flex-wrap: wrap; }
+.spm-row .spm-grow { flex: 1 1 12rem; }
+.spm-section { margin-top: 1.5rem; }
