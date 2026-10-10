@@ -1,6 +1,6 @@
 // Tests for the pure parts of stash-plugin-menu.js (list cleaning, merging registered + user entries, inserting next to Statistics).
 // Run:  node tests/test_menu.js
-const { cleanPages, mergeEntries, insertUtilityItem } = require('../stash-plugin-menu.js');
+const { cleanPages, mergeEntries, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
 let fails = 0;
 const check = (name, ok) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`); if (!ok) fails += 1; };
 
@@ -27,5 +27,13 @@ const out = insertUtilityItem(React, [React.createElement(Fragment, { key: 'f' }
 check('inserted right after Statistics', React.Children.toArray(out[0].props.children).map((c) => c.key).join(',') === 'donate,stats,spm-menu,settings,help');
 check('no Statistics icon -> first', React.Children.toArray(insertUtilityItem(React, [React.createElement(Fragment, { key: 'f' }, React.createElement('a', { key: 'x', to: '/x' }))], React.createElement('mine', { key: 'spm-menu' }))[0].props.children)[0].key === 'spm-menu');
 check('no fragment -> in front', insertUtilityItem(React, [React.createElement('b', { key: 'b' })], React.createElement('mine', { key: 'spm-menu' }))[0].key === 'spm-menu');
+
+const wide = panelPlacement({ bottom: 40, right: 1500 }, 1568, 610);
+check('wide screen: under the icon, right edges aligned, fixed width', wide.top === 44 && wide.right === 68 && wide.left === 'auto' && wide.width === 288 && wide.maxHeight === 558);
+const narrow = panelPlacement({ bottom: 56, right: 300 }, 360, 640);
+check('narrow screen: spans the width with 8px gutters', narrow.left === 8 && narrow.right === 8 && narrow.width === 'auto' && narrow.maxHeight === 572);
+const edge = panelPlacement({ bottom: 40, right: 1568 }, 1568, 610);
+check('icon at the very edge: keeps the 8px gutter', edge.right === 8);
+check('very small height: still at least 120px', panelPlacement({ bottom: 40, right: 800 }, 1000, 100).maxHeight === 120);
 console.log(fails ? `\n${fails} FAILED` : '\nALL OK');
 process.exit(fails ? 1 : 0);

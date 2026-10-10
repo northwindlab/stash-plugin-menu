@@ -1,10 +1,10 @@
 /**
- * Plugin Menu -- one icon in Stash's top bar (MainNavBar.UtilityItems, right of Statistics) with a drop-down of plugin pages.
+ * Plugin Menu -- one icon in Stash's top bar (MainNavBar.UtilityItems, right of Statistics) with a floating menu of plugin pages.
  *
  *  - Entries come from two places: plugins that register themselves (see "For plugin authors" in the README: push {id, label, path, badge?}
  *    to window.__stashPluginMenuQueue or call window.StashPluginMenu.register -- works whichever plugin loads first) and the entries the user
  *    adds on the page /plugins/stash-plugin-menu (stored as JSON in this plugin's own Stash setting `pages`).
- *  - No entries: the icon links to the editor page. Otherwise a drop-down with the entries and "Edit menu..." at the bottom.
+ *  - A click opens a floating panel (fixed under the icon): the entries, then "Edit menu..." -- which is all there is while nothing is registered.
  *  - A registered `badge: () => boolean` puts a dot on the icon while it returns true (call window.StashPluginMenu.refresh() when it changes).
  */
 (function () {
@@ -48,7 +48,19 @@
     return list.map((c) => (c === frag ? React.createElement(React.Fragment, { key: c.key }, ...inner) : c));
   }
 
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, mergeEntries, insertUtilityItem }; return; }
+  // Where the floating panel goes: under the icon, right edge aligned with it; on a narrow screen it spans the width (8px gutters).
+  // `rect` = the icon's bounding box; returns CSS pixel values for position: fixed.
+  const PANEL_GUTTER = 8;
+  const PANEL_WIDTH = 288;
+  function panelPlacement(rect, viewportWidth, viewportHeight) {
+    const top = Math.round(rect.bottom + 4);
+    const maxHeight = Math.max(120, viewportHeight - top - PANEL_GUTTER);
+    if (viewportWidth < 480) return { top, left: PANEL_GUTTER, right: PANEL_GUTTER, width: 'auto', maxHeight };
+    const right = Math.max(PANEL_GUTTER, Math.round(viewportWidth - rect.right));
+    return { top, left: 'auto', right, width: Math.min(PANEL_WIDTH, viewportWidth - 2 * PANEL_GUTTER), maxHeight };
+  }
+
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, mergeEntries, insertUtilityItem, panelPlacement }; return; }
 
   // ---------- registry for other plugins ----------
 
@@ -67,7 +79,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.1.2', register, refresh };
+  window.StashPluginMenu = { version: '0.2.0', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -115,37 +127,70 @@
     try {
       const React = PluginApi.React;
       const RR = PluginApi.libraries.ReactRouterDOM;
-      const { Link } = RR;
-      const NavLink = RR.NavLink || Link;
       const useLocation = RR.useLocation || (() => window.location);
-      const { Button, Dropdown } = PluginApi.libraries.Bootstrap;
+      const { Button } = PluginApi.libraries.Bootstrap;
       const { FontAwesomeIcon } = PluginApi.libraries.ReactFontAwesome;
       const solid = PluginApi.libraries.FontAwesomeSolid;
       const icon = solid.faPuzzlePiece || solid.faGrip || solid.faEye;
 
       const glyph = (busy) => [React.createElement(FontAwesomeIcon, { key: 'i', icon }), React.createElement('span', { key: 'd', className: 'spm-dot', hidden: !busy })];
+
+      // The panel is plain DOM on <body> (position: fixed), not a child of the top bar: it is never clipped or mis-placed by the collapsed
+      // navbar of a narrow window or by a theme's navbar styles, and it uses Bootstrap's own dropdown classes so every theme styles it.
+      let panel = null;
+      const closePanel = () => {
+        if (!panel) return;
+        panel.remove(); panel = null;
+        document.removeEventListener('mousedown', onOutside, true);
+        document.removeEventListener('keydown', onKey, true);
+        window.removeEventListener('resize', closePanel);
+      };
+      const onOutside = (e) => { if (panel && !panel.contains(e.target) && !e.target.closest('.spm-menu')) closePanel(); };
+      const onKey = (e) => { if (e.key === 'Escape') closePanel(); };
+      const go = (path) => {  // inside Stash's router: push the address and let the router see it
+        window.history.pushState({}, '', path);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      };
+      const openPanel = (anchor) => {
+        if (panel) { closePanel(); return; }
+        const entries = mergeEntries(registered, readCache());
+        const link = (label, path) => {
+          const a = el('a', { className: 'dropdown-item', href: path, textContent: label });
+          a.addEventListener('click', (e) => {
+            if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;  // let the browser open it in a new tab
+            e.preventDefault(); closePanel(); go(path);
+          });
+          return a;
+        };
+        panel = el('div', { className: 'dropdown-menu show spm-panel', role: 'menu' }, [
+          ...entries.map((e) => link(e.label, e.path)),
+          entries.length ? el('div', { className: 'dropdown-divider' }) : null,
+          link('Edit menu…', PAGE_PATH),
+        ]);
+        const pos = panelPlacement(anchor.getBoundingClientRect(), window.innerWidth, window.innerHeight);
+        Object.entries({ top: pos.top, left: pos.left, right: pos.right, width: pos.width, maxHeight: pos.maxHeight })
+          .forEach(([k, v]) => { panel.style[k] = typeof v === 'number' ? `${v}px` : v; });
+        document.body.appendChild(panel);
+        document.addEventListener('mousedown', onOutside, true);
+        document.addEventListener('keydown', onKey, true);
+        window.addEventListener('resize', closePanel);
+      };
+
       const renderMenu = () => {
-        const [user, setUser] = React.useState(readCache);
         const [, tick] = React.useState(0);
         const location = useLocation();
         React.useEffect(() => {
-          const onChange = () => { setUser(readCache()); tick((n) => n + 1); };
+          const onChange = () => tick((n) => n + 1);
           window.addEventListener(EVENT, onChange);
           loadFromStash();
           return () => window.removeEventListener(EVENT, onChange);
         }, []);
-        const entries = mergeEntries(registered, user);
+        React.useEffect(() => { closePanel(); }, [location.pathname]);  // leaving a page closes the panel
+        const entries = mergeEntries(registered, readCache());
         const busy = registered.some((e) => { try { return e.badge && e.badge(); } catch (x) { return false; } });
         const here = entries.some((e) => location.pathname === e.path || location.pathname.startsWith(`${e.path}/`)) || location.pathname === PAGE_PATH;
-        const link = (to, title) => React.createElement(NavLink, { className: 'nav-utility spm-menu', to, isActive: () => here },
-          React.createElement(Button, { className: 'minimal d-flex align-items-center h-100', title }, ...glyph(busy)));
-        if (!entries.length) return link(PAGE_PATH, 'Plugin menu: add your plugin pages');
-        if (!Dropdown) return link(entries[0].path, entries[0].label);  // (no drop-down component: at least the first page)
-        const item = (key, label, to) => React.createElement(Dropdown.Item, { key, as: Link, to }, label);
-        return React.createElement(Dropdown, { className: `nav-utility spm-menu${here ? ' active' : ''}`, alignRight: true },
-          React.createElement(Dropdown.Toggle, { as: Button, className: 'minimal d-flex align-items-center h-100', title: 'Plugins' }, ...glyph(busy)),
-          React.createElement(Dropdown.Menu, null, ...entries.map((e) => item(e.path, e.label, e.path)),
-            React.createElement(Dropdown.Divider, { key: 'div' }), item('edit', 'Edit menu…', PAGE_PATH)));
+        return React.createElement('div', { className: `nav-utility spm-menu${here ? ' active' : ''}` },
+          React.createElement(Button, { className: 'minimal d-flex align-items-center h-100', title: 'Plugins', onClick: (e) => openPanel(e.currentTarget) }, ...glyph(busy)));
       };
       const Menu = () => { try { return renderMenu(); } catch (e) { console.error('[Plugin Menu] icon failed:', e); return null; } }; // never take the top bar down
 

@@ -1,6 +1,5 @@
-/* Plugin Menu: the icon among Stash's utility icons -- no drop-down caret, a dot when a plugin reports activity. */
+/* Plugin Menu: the icon among Stash's utility icons (a dot when a plugin reports activity) and the floating panel under it. */
 .spm-menu { position: relative; }
-.spm-menu .dropdown-toggle::after { display: none; }
 .spm-menu .btn { position: relative; }
 .spm-dot { position: absolute; top: 0.35em; right: 0.2em; width: 0.55em; height: 0.55em; border-radius: 50%; background: #f5a623; }
 .spm-dot[hidden] { display: none; }
@@ -10,3 +9,7 @@
 .spm-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0; flex-wrap: wrap; }
 .spm-row .spm-grow { flex: 1 1 12rem; }
 .spm-section { margin-top: 1.5rem; }
+
+/* The floating panel: plain DOM on <body>, fixed under the icon (placement computed in the script); Bootstrap's dropdown classes give it the theme's look. */
+.spm-panel { position: fixed !important; transform: none !important; margin: 0; z-index: 2000; overflow-y: auto; overflow-x: hidden; }
+.spm-panel .dropdown-item { white-space: normal; padding: 0.55rem 1rem; }

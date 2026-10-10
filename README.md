@@ -1,8 +1,8 @@
 # Plugin Menu for Stash
 
-One icon in Stash's top bar (right of *Statistics*) with a drop-down of your plugin pages -- instead of one top-bar entry per plugin.
+One icon in Stash's top bar (right of *Statistics*) with a floating menu of your plugin pages -- instead of one top-bar entry per plugin.
 
-* No entries: the icon links to the editor page. Otherwise it opens a drop-down with the entries and "Edit menu…" at the bottom.
+* No entries: the icon links to the editor page. Otherwise it opens a floating panel with the entries and "Edit menu…" at the bottom.
 * A dot on the icon while a plugin reports activity (for example a running download).
 * No server, no sidecar: the list is stored in this plugin's own Stash setting.
 

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.0
+- The menu is a floating panel (fixed under the icon, drawn on the page, not inside the top bar): it is no longer clipped or misplaced by themes or by the collapsed top bar of a narrow window; on narrow screens it spans the width. Closes on outside click, Escape, resize and navigation.
+
 ## 0.1.2
 - The editor page is removed when Stash navigates away inside the app.
 
