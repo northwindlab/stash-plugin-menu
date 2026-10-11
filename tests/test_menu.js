@@ -35,5 +35,11 @@ check('narrow screen: spans the width with 8px gutters', narrow.left === 8 && na
 const edge = panelPlacement({ bottom: 40, right: 1568 }, 1568, 610);
 check('icon at the very edge: keeps the 8px gutter', edge.right === 8);
 check('very small height: still at least 120px', panelPlacement({ bottom: 40, right: 800 }, 1000, 100).maxHeight === 120);
-console.log(fails ? `\n${fails} FAILED` : '\nALL OK');
+const lowIcon = panelPlacement({ top: 575, bottom: 605, left: 200, right: 240 }, 500, 657);
+check('icon at the bottom of a small window: panel above the icon, inside the window', lowIcon.top === 'auto' && lowIcon.bottom === 86 && lowIcon.maxHeight === 563);
+check('icon far left: panel does not leave the window on the left', lowIcon.right === 500 - 8 - 288 && 500 - lowIcon.right - lowIcon.width >= 8);
+check('normal case: below the icon, bottom stays auto', wide.bottom === 'auto' && narrow.bottom === 'auto');
+const lowNarrow = panelPlacement({ top: 580, bottom: 610, left: 100, right: 140 }, 360, 650);
+check('narrow and low: above the icon, full width', lowNarrow.top === 'auto' && lowNarrow.bottom === 74 && lowNarrow.left === 8 && lowNarrow.right === 8);
+console.log(fails ?`\n${fails} FAILED` : '\nALL OK');
 process.exit(fails ? 1 : 0);

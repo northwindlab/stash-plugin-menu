@@ -48,16 +48,23 @@
     return list.map((c) => (c === frag ? React.createElement(React.Fragment, { key: c.key }, ...inner) : c));
   }
 
-  // Where the floating panel goes: under the icon, right edge aligned with it; on a narrow screen it spans the width (8px gutters).
-  // `rect` = the icon's bounding box; returns CSS pixel values for position: fixed.
+  // Where the floating panel goes: under the icon, right edge aligned with it (kept inside the window); above the icon when
+  // there is little room below (icon at the bottom of the collapsed bar); on a narrow screen it spans the width (8px gutters).
+  // `rect` = the icon's bounding box; returns CSS pixel values for position: fixed (vertical: either top or bottom is a number).
   const PANEL_GUTTER = 8;
   const PANEL_WIDTH = 288;
+  const PANEL_MIN_BELOW = 160;
   function panelPlacement(rect, viewportWidth, viewportHeight) {
-    const top = Math.round(rect.bottom + 4);
-    const maxHeight = Math.max(120, viewportHeight - top - PANEL_GUTTER);
-    if (viewportWidth < 480) return { top, left: PANEL_GUTTER, right: PANEL_GUTTER, width: 'auto', maxHeight };
-    const right = Math.max(PANEL_GUTTER, Math.round(viewportWidth - rect.right));
-    return { top, left: 'auto', right, width: Math.min(PANEL_WIDTH, viewportWidth - 2 * PANEL_GUTTER), maxHeight };
+    const belowTop = Math.round(rect.bottom + 4);
+    const below = viewportHeight - belowTop - PANEL_GUTTER;
+    const above = (rect.top === undefined ? rect.bottom : rect.top) - 4 - PANEL_GUTTER;
+    const vertical = below < PANEL_MIN_BELOW && above > below
+      ? { top: 'auto', bottom: Math.round(viewportHeight - rect.top + 4), maxHeight: Math.max(120, above) }
+      : { top: belowTop, bottom: 'auto', maxHeight: Math.max(120, below) };
+    if (viewportWidth < 480) return { ...vertical, left: PANEL_GUTTER, right: PANEL_GUTTER, width: 'auto' };
+    const width = Math.min(PANEL_WIDTH, viewportWidth - 2 * PANEL_GUTTER);
+    const right = Math.min(Math.max(PANEL_GUTTER, Math.round(viewportWidth - rect.right)), viewportWidth - PANEL_GUTTER - width);
+    return { ...vertical, left: 'auto', right, width };
   }
 
   if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, mergeEntries, insertUtilityItem, panelPlacement }; return; }
@@ -79,7 +86,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.2.0', register, refresh };
+  window.StashPluginMenu = { version: '0.2.1', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -167,8 +174,8 @@
           entries.length ? el('div', { className: 'dropdown-divider' }) : null,
           link('Edit menu…', PAGE_PATH),
         ]);
-        const pos = panelPlacement(anchor.getBoundingClientRect(), window.innerWidth, window.innerHeight);
-        Object.entries({ top: pos.top, left: pos.left, right: pos.right, width: pos.width, maxHeight: pos.maxHeight })
+        const pos = panelPlacement(anchor.getBoundingClientRect(), document.documentElement.clientWidth, document.documentElement.clientHeight);  // without the scrollbars: that is what position: fixed uses
+        Object.entries({ top: pos.top, bottom: pos.bottom, left: pos.left, right: pos.right, width: pos.width, maxHeight: pos.maxHeight })
           .forEach(([k, v]) => { panel.style[k] = typeof v === 'number' ? `${v}px` : v; });
         document.body.appendChild(panel);
         document.addEventListener('mousedown', onOutside, true);
