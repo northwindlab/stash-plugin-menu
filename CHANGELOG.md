@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.1
+- Image addresses of the form `github.com/<user>/<repo>/raw/...` (or `/blob/...`) are loaded from `raw.githubusercontent.com`: the github.com address redirects without a CORS header, so the browser could not read it.
+
 ## 0.5.0
 - Icon from an image address: paste an `https://` address into the icon field; the image is fetched once and only a small copy (PNG, at most 64 px) is kept in the setting, so nothing is requested from that site when the menu is shown. Works when the site lets other sites read its images (CORS); otherwise a message says so and the upload button is the way.
 

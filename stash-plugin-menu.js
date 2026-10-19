@@ -70,6 +70,13 @@
     return out;
   }
 
+  // github.com/<user>/<repo>/raw|blob/<ref>/<file> answers with a redirect that carries no CORS header, so a browser cannot read it;
+  // the file itself is served by raw.githubusercontent.com, which allows it.
+  function normalizeImageUrl(url) {
+    const m = /^https:\/\/github\.com\/([^/?#]+)\/([^/?#]+)\/(?:raw|blob)\/([^?#]+)(?:\?raw=true)?$/.exec(url);
+    return m ? `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}` : url;
+  }
+
   // Which pages does a plugin have? Stash does not say, so read the plugin's script: a page is either registered with
   // PluginApi.register.route("/path", ...) or lives at /plugins/<plugin id> (drawn by the plugin itself). A hint, not a guarantee.
   function detectPages(pluginId, source) {
@@ -110,7 +117,7 @@
     return { ...vertical, left: 'auto', right, width };
   }
 
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, insertUtilityItem, panelPlacement }; return; }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, insertUtilityItem, panelPlacement }; return; }
 
   // ---------- registry for other plugins ----------
 
@@ -129,7 +136,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.5.0', register, refresh };
+  window.StashPluginMenu = { version: '0.5.1', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -346,7 +353,7 @@
   }
   // Fetch an image by its address once and keep only the small copy (nothing is requested from that site when the menu is shown).
   const isImageUrl = (v) => /^https?:\/\/[^\s@]+$/i.test(v);
-  const urlToIcon = (url) => (isImageUrl(url) ? pictureToIcon(url, true) : Promise.reject(new Error('That is not an http(s) address.')));
+  const urlToIcon = (url) => (isImageUrl(url) ? pictureToIcon(normalizeImageUrl(url), true) : Promise.reject(new Error('That is not an http(s) address.')));
 
   // Icon field: a grid of the icons themselves (a <datalist> cannot show pictures) -- click into the field, type to filter, click an icon --
   // plus an upload button for an own image; an image address (https://...) is fetched once and kept as a small copy. A path, an address or a stored image: no grid. The grid shows at most PICKER_MAX icons.

@@ -1,6 +1,6 @@
 // Tests for the pure parts of stash-plugin-menu.js (list cleaning, merging registered + user entries, inserting next to Statistics).
 // Run:  node tests/test_menu.js
-const { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
+const { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
 let fails = 0;
 const check = (name, ok) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`); if (!ok) fails += 1; };
 
@@ -21,6 +21,10 @@ check('icon: FontAwesome name or Stash path accepted, rest dropped', cleanIcon('
 check('icon: small uploaded PNG accepted; other data types, other encodings, oversize and script dropped', cleanIcon('data:image/png;base64,iVBORw0KGgo=') === 'data:image/png;base64,iVBORw0KGgo='
   && cleanIcon('data:image/svg+xml;base64,PHN2Zz4=') === undefined && cleanIcon('data:text/html;base64,PGI+') === undefined && cleanIcon('data:image/png,abc') === undefined
   && cleanIcon('data:image/png;base64,<script>') === undefined && cleanIcon(`data:image/png;base64,${'A'.repeat(8000)}`) === undefined);
+check('github.com raw / blob addresses go to raw.githubusercontent.com', normalizeImageUrl('https://github.com/u/r/raw/main/assets/i.png') === 'https://raw.githubusercontent.com/u/r/main/assets/i.png'
+  && normalizeImageUrl('https://github.com/u/r/blob/main/a/i.png?raw=true') === 'https://raw.githubusercontent.com/u/r/main/a/i.png');
+check('other addresses stay as they are', normalizeImageUrl('https://example.com/github.com/u/r/raw/x.png') === 'https://example.com/github.com/u/r/raw/x.png'
+  && normalizeImageUrl('https://github.com/u/r') === 'https://github.com/u/r' && normalizeImageUrl('https://github.com.evil.example/u/r/raw/m/i.png') === 'https://github.com.evil.example/u/r/raw/m/i.png');
 check('entry keeps a valid icon, drops a bad one', cleanPages([{ label: 'a', path: '/a', icon: 'faBolt' }, { label: 'b', path: '/b', icon: 'javascript:1' }]).map((e) => e.icon).join(',') === 'faBolt,');
 check('prefs: defaults', JSON.stringify(cleanPrefs(null)) === '{"icons":false,"overrides":{}}' && cleanPrefs('x').icons === false);
 check('prefs: icons only when exactly true', cleanPrefs({ icons: true }).icons === true && cleanPrefs({ icons: 'yes' }).icons === false);
