@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.0
+- Icon from an image address: paste an `https://` address into the icon field; the image is fetched once and only a small copy (PNG, at most 64 px) is kept in the setting, so nothing is requested from that site when the menu is shown. Works when the site lets other sites read its images (CORS); otherwise a message says so and the upload button is the way.
+
 ## 0.4.0
 - Own images as icons: the upload button (⬆) next to the icon field scales an image down to a small PNG (at most 64 px, under 8 KB) and stores it in the setting; no external image addresses. A path inside Stash typed into the field still works.
 

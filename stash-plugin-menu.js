@@ -129,7 +129,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.4.0', register, refresh };
+  window.StashPluginMenu = { version: '0.5.0', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -309,16 +309,14 @@
     return iconNameCache;
   }
 
-  // An image file -> a small square PNG (data: address) that fits MAX_DATA_ICON: 64, then 48, then 32 pixels.
-  function imageToIcon(file) {
+  // Draw a picture into a small square PNG (data: address) that fits MAX_DATA_ICON: 64, then 48, then 32 pixels.
+  // `cors`: the picture comes from another site and is requested with CORS, so the canvas stays readable (only possible when that site allows it).
+  function pictureToIcon(src, cors) {
     return new Promise((resolve, reject) => {
-      if (!file || !/^image\//.test(file.type)) { reject(new Error('That is not an image.')); return; }
-      if (file.size > 2 * 1024 * 1024) { reject(new Error('The image is larger than 2 MB.')); return; }
-      const reader = new FileReader();  // Stash's CSP allows data: images but not blob: ones
-      reader.onerror = () => reject(new Error('Could not read the file.'));
-      reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
+      const img = new Image();
+      if (cors) img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
           const w = img.naturalWidth || img.width; const h = img.naturalHeight || img.height;
           if (!w || !h) { reject(new Error('Could not read the size of the image.')); return; }
           for (const size of [64, 48, 32]) {
@@ -330,23 +328,35 @@
             if (d.length <= MAX_DATA_ICON) { resolve(d); return; }
           }
           reject(new Error('The image is too detailed for an icon; try a simpler one.'));
-        };
-        img.onerror = () => reject(new Error('Could not read the image.'));
-        img.src = reader.result;
+        } catch (e) { reject(new Error('The image cannot be read from that address.')); }
       };
+      img.onerror = () => reject(new Error(cors ? 'Could not load the image from that address: not found, or the site does not let other sites read its images. Download it and use the upload button instead.' : 'Could not read the image.'));
+      img.src = src;
+    });
+  }
+  function imageToIcon(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type)) { reject(new Error('That is not an image.')); return; }
+      if (file.size > 2 * 1024 * 1024) { reject(new Error('The image is larger than 2 MB.')); return; }
+      const reader = new FileReader();  // Stash's CSP allows data: images but not blob: ones
+      reader.onerror = () => reject(new Error('Could not read the file.'));
+      reader.onload = () => resolve(pictureToIcon(reader.result, false));
       reader.readAsDataURL(file);
     });
   }
+  // Fetch an image by its address once and keep only the small copy (nothing is requested from that site when the menu is shown).
+  const isImageUrl = (v) => /^https?:\/\/[^\s@]+$/i.test(v);
+  const urlToIcon = (url) => (isImageUrl(url) ? pictureToIcon(url, true) : Promise.reject(new Error('That is not an http(s) address.')));
 
   // Icon field: a grid of the icons themselves (a <datalist> cannot show pictures) -- click into the field, type to filter, click an icon --
-  // plus an upload button for an own image. A path (starts with /) or an uploaded image: no grid. The grid shows at most PICKER_MAX icons.
+  // plus an upload button for an own image; an image address (https://...) is fetched once and kept as a small copy. A path, an address or a stored image: no grid. The grid shows at most PICKER_MAX icons.
   const PICKER_MAX = 96;
-  const UPLOADED = '(uploaded image)';
-  function iconPicker(value, onSave, onError) {
+  const UPLOADED = '(stored image)';
+  function iconPicker(value, onSave, notify) {
     let current = cleanIcon(value) || '';
     const input = el('input', { type: 'text', className: 'form-control', placeholder: 'Icon (optional)' });
     input.value = current.startsWith('data:') ? UPLOADED : current;
-    input.title = 'A FontAwesome name such as faBolt (click to pick one), an image path inside Stash such as /plugin/my-plugin/assets/icon.png, or upload an image';
+    input.title = 'A FontAwesome name such as faBolt (click to pick one), an image address (https://...: the image is fetched once and a small copy is kept), an image path inside Stash, or upload an image with the button';
     const preview = el('span', { className: 'spm-picker-preview' });
     const grid = el('div', { className: 'spm-picker-grid dropdown-menu show' });
     grid.hidden = true;
@@ -356,7 +366,7 @@
     const showPreview = () => { const v = cleanIcon(typed()); preview.replaceChildren(v ? iconNode(v) : el('span', { className: 'spm-icon' })); };
     const fill = () => {
       const q = input.value.trim().toLowerCase();
-      if (q.startsWith('/') || q.startsWith('(')) { grid.hidden = true; return; }
+      if (q.startsWith('/') || q.startsWith('(') || /^https?:/.test(q)) { grid.hidden = true; return; }
       const hits = iconNameList().filter((n) => n.toLowerCase().includes(q)).slice(0, PICKER_MAX);
       grid.replaceChildren(...(hits.length ? hits.map((n) => el('button', { type: 'button', className: 'spm-pick', title: n, onMouseDown: (e) => {
         e.preventDefault();  // keep the focus in the field: no blur / change before the pick
@@ -368,12 +378,21 @@
     input.addEventListener('input', () => { showPreview(); fill(); });
     input.addEventListener('blur', () => { grid.hidden = true; });
     input.addEventListener('keydown', (e) => { if (e.key === 'Escape') grid.hidden = true; });
-    input.addEventListener('change', () => { current = typed(); onSave(current); });
+    input.addEventListener('change', async () => {
+      const v = input.value.trim();
+      if (isImageUrl(v)) {
+        notify('Loading the image…');
+        try { current = await urlToIcon(v); input.value = UPLOADED; showPreview(); onSave(current); } catch (e) { notify(e.message); }
+        return;
+      }
+      current = typed();
+      onSave(current);
+    });
     file.addEventListener('change', async () => {
       const f = file.files && file.files[0];
       file.value = '';
       if (!f) return;
-      try { current = await imageToIcon(f); input.value = UPLOADED; showPreview(); onSave(current); } catch (e) { onError(e.message); }
+      try { current = await imageToIcon(f); input.value = UPLOADED; showPreview(); onSave(current); } catch (e) { notify(e.message); }
     });
     showPreview();
     return el('div', { className: 'spm-picker spm-icon-input' }, [preview, input,
