@@ -1,6 +1,6 @@
 // Tests for the pure parts of stash-plugin-menu.js (list cleaning, merging registered + user entries, inserting next to Statistics).
 // Run:  node tests/test_menu.js
-const { cleanPages, mergeEntries, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
+const { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
 let fails = 0;
 const check = (name, ok) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`); if (!ok) fails += 1; };
 
@@ -15,6 +15,21 @@ const merged = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }, { label: 'Du
 check('registered first: by order, then label', merged.map((e) => e.label).join(',') === 'Alpha,Beta,Gamma,Mine');
 check('a path is listed once (the plugin wins)', merged.filter((e) => e.path === '/plugins/b').length === 1 && merged.find((e) => e.path === '/plugins/b').source === 'plugin');
 check('sources marked', merged.find((e) => e.label === 'Mine').source === 'user');
+
+check('icon: FontAwesome name or Stash path accepted, rest dropped', cleanIcon('faBolt') === 'faBolt' && cleanIcon('/plugin/x/assets/i.png') === '/plugin/x/assets/i.png'
+  && cleanIcon('https://evil.example/i.png') === undefined && cleanIcon('//evil.example/i.png') === undefined && cleanIcon('bolt') === undefined && cleanIcon(5) === undefined);
+check('entry keeps a valid icon, drops a bad one', cleanPages([{ label: 'a', path: '/a', icon: 'faBolt' }, { label: 'b', path: '/b', icon: 'javascript:1' }]).map((e) => e.icon).join(',') === 'faBolt,');
+check('prefs: defaults', JSON.stringify(cleanPrefs(null)) === '{"icons":false,"overrides":{}}' && cleanPrefs('x').icons === false);
+check('prefs: icons only when exactly true', cleanPrefs({ icons: true }).icons === true && cleanPrefs({ icons: 'yes' }).icons === false);
+check('prefs: overrides cleaned (bad path / empty entries dropped, label trimmed)', JSON.stringify(cleanPrefs({ overrides: { '/a': { label: ' New ', icon: 'faBolt' }, 'https://x': { label: 'x' }, '/b': {}, '/c': null, '/d': { icon: 'nope' } } }).overrides) === '{"/a":{"label":"New","icon":"faBolt"}}');
+const renamed = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }], { '/plugins/c': { label: 'Aardvark', icon: 'faBolt' } });
+check('rename: the shown label wins, sorting follows it, default kept', renamed.map((e) => e.label).join(',') === 'Alpha,Aardvark,Beta,Mine' && renamed.find((e) => e.path === '/plugins/c').defaultLabel === 'Gamma' && renamed.find((e) => e.path === '/plugins/c').icon === 'faBolt');
+check('no overrides: as before', mergeEntries(reg, []).map((e) => e.label).join(',') === 'Alpha,Beta,Gamma');
+check('detect: register.route path', detectPages('x', 'PluginApi.register.route("/my-page", Comp)').join() === '/my-page' && detectPages('x', "register . route('/a/b', C)").join() === '/a/b');
+check('detect: own /plugins/<id> address', detectPages('stash-sense2', "path = '/plugins/stash-sense2'").join() === '/plugins/stash-sense2');
+check('detect: another plugin\'s address with the same prefix is not a hit', detectPages('stash-sense', "/plugins/stash-sense2").length === 0);
+check('detect: nothing, dynamic or foreign paths -> none', detectPages('a', 'console.log(1)').length === 0 && detectPages('a', 'register.route(`/x/${id}`, C)').length === 0 && detectPages('a', 'register.route("https://evil.example", C)').length === 0);
+check('detect: regex characters in an id are harmless', detectPages('a.b', '/plugins/aXb').length === 0 && detectPages('a.b', '/plugins/a.b').length === 1);
 
 const Fragment = Symbol('Fragment');
 const React = {

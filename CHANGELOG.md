@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+- Rename every entry: your own ones in their name field, entries added by plugins in the second list (an empty field keeps the plugin's name).
+- Optional icon in front of every entry (setting "Show an icon in front of every entry"); an icon is a FontAwesome name (`faBolt`) or an image path inside Stash, set per entry in the editor or passed by a plugin as `icon`.
+- "Add an installed plugin" lists only plugins that have a page of their own, found by reading each plugin's script (a `register.route(...)` call or its `/plugins/<id>` address); a checkbox shows all plugins again. A hint, not a guarantee.
+- New setting `prefs` (JSON) next to `pages`; both are always saved together.
+
 ## 0.2.1
 - Fix: in a small window (collapsed top bar, icon far left and low) the panel is no longer cut off at the left or bottom edge: it is kept inside the window and opens above the icon when there is little room below; the window width is measured without the scrollbar.
 

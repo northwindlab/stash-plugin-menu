@@ -14,27 +14,67 @@
   const PAGE_PATH = `/plugins/${PLUGIN_ID}`;
   const CACHE_KEY = 'spm:pages';
   const EVENT = 'spm-change';
+  const PREFS_KEY = 'spm:prefs';
   const MAX_USER_ENTRIES = 12;
+  const MAX_OVERRIDES = 50;
 
   // ---------- pure helpers (tested in tests/test_menu.js) ----------
+
+  const isPath = (p) => typeof p === 'string' && /^\/[A-Za-z0-9/_.\-?=&#%]*$/.test(p) && !p.includes('//');
+
+  // An icon is the name of a FontAwesome solid icon (faBolt) or an image path inside Stash (/plugin/x/assets/icon.png); anything else: none.
+  function cleanIcon(v) {
+    if (typeof v !== 'string') return undefined;
+    const s = v.trim();
+    return /^fa[A-Z][A-Za-z0-9]*$/.test(s) || isPath(s) ? s : undefined;
+  }
 
   function cleanPages(list) {
     if (!Array.isArray(list)) return [];
     return list
-      .filter((x) => x && typeof x.label === 'string' && x.label.trim() && typeof x.path === 'string'
-        && /^\/[A-Za-z0-9/_.\-?=&#%]*$/.test(x.path) && !x.path.includes('//'))
-      .map((x) => ({ label: x.label.trim().slice(0, 40), path: x.path }))
+      .filter((x) => x && typeof x.label === 'string' && x.label.trim() && isPath(x.path))
+      .map((x) => { const icon = cleanIcon(x.icon); return { label: x.label.trim().slice(0, 40), path: x.path, ...(icon ? { icon } : {}) }; })
       .slice(0, MAX_USER_ENTRIES);
   }
 
-  // Registered entries first (by `order`, then label), then the user's; a path is listed once (the registered entry wins).
-  function mergeEntries(registered, user) {
+  // Settings: `icons` shows an icon in front of every entry; `overrides` renames (and gives an icon to) entries added by plugins, by path.
+  function cleanPrefs(p) {
+    const out = { icons: false, overrides: {} };
+    if (!p || typeof p !== 'object') return out;
+    out.icons = p.icons === true;
+    const o = p.overrides && typeof p.overrides === 'object' ? p.overrides : {};
+    for (const path of Object.keys(o).slice(0, MAX_OVERRIDES)) {
+      if (!isPath(path)) continue;
+      const v = o[path] || {};
+      const label = typeof v.label === 'string' ? v.label.trim().slice(0, 40) : '';
+      const icon = cleanIcon(v.icon);
+      if (label || icon) out.overrides[path] = { ...(label ? { label } : {}), ...(icon ? { icon } : {}) };
+    }
+    return out;
+  }
+
+  // Registered entries first (by `order`, then shown label), then the user's; a path is listed once (the registered entry wins).
+  // `overrides` (from cleanPrefs) rename / re-icon the registered entries; `defaultLabel` keeps the name the plugin gave.
+  function mergeEntries(registered, user, overrides) {
+    const ov = overrides || {};
     const out = [];
     const seen = new Set();
-    const reg = [...registered].sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.label.localeCompare(b.label));
+    const reg = registered
+      .map((e) => ({ ...e, defaultLabel: e.label, label: (ov[e.path] && ov[e.path].label) || e.label, icon: (ov[e.path] && ov[e.path].icon) || e.icon }))
+      .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.label.localeCompare(b.label));
     for (const e of reg) { if (!seen.has(e.path)) { seen.add(e.path); out.push({ ...e, source: 'plugin' }); } }
     for (const e of user) { if (!seen.has(e.path)) { seen.add(e.path); out.push({ ...e, source: 'user' }); } }
     return out;
+  }
+
+  // Which pages does a plugin have? Stash does not say, so read the plugin's script: a page is either registered with
+  // PluginApi.register.route("/path", ...) or lives at /plugins/<plugin id> (drawn by the plugin itself). A hint, not a guarantee.
+  function detectPages(pluginId, source) {
+    const found = [];
+    for (const m of String(source).matchAll(/register\s*\.\s*route\s*\(\s*(["'`])([^"'`$]+)\1/g)) if (isPath(m[2])) found.push(m[2]);
+    const esc = String(pluginId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`/plugins/${esc}(?![A-Za-z0-9_-])`).test(source)) found.push(`/plugins/${pluginId}`);
+    return [...new Set(found)];
   }
 
   // The utility children are ONE fragment holding the icons; put `item` right after the Statistics icon (or first).
@@ -67,14 +107,14 @@
     return { ...vertical, left: 'auto', right, width };
   }
 
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, mergeEntries, insertUtilityItem, panelPlacement }; return; }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, insertUtilityItem, panelPlacement }; return; }
 
   // ---------- registry for other plugins ----------
 
   const registered = [];
   function register(item) {
     if (!item || typeof item.label !== 'string' || typeof item.path !== 'string') return;
-    const clean = cleanPages([{ label: item.label, path: item.path }])[0];
+    const clean = cleanPages([{ label: item.label, path: item.path, icon: item.icon }])[0];
     if (!clean) return;
     const at = registered.findIndex((x) => x.id === (item.id || clean.path));
     const entry = { ...clean, id: item.id || clean.path, order: item.order, badge: typeof item.badge === 'function' ? item.badge : null };
@@ -86,7 +126,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.2.1', register, refresh };
+  window.StashPluginMenu = { version: '0.3.0', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -96,9 +136,15 @@
   function readCache() {
     try { return cleanPages(JSON.parse(localStorage.getItem(CACHE_KEY) || '[]')); } catch (e) { return []; }
   }
-  function writeCache(list) {
+  function readPrefs() {
+    try { return cleanPrefs(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')); } catch (e) { return cleanPrefs(null); }
+  }
+  function writeCache(list, prefs) {
     const clean = cleanPages(list);
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(clean)); } catch (e) { /* private mode */ }
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(clean));
+      if (prefs) localStorage.setItem(PREFS_KEY, JSON.stringify(cleanPrefs(prefs)));
+    } catch (e) { /* private mode */ }
     refresh();
     return clean;
   }
@@ -114,14 +160,17 @@
     refreshed = true;
     try {
       const data = await gql('{ configuration { plugins } }');
-      const raw = ((data.configuration.plugins || {})[PLUGIN_ID] || {}).pages;
-      return writeCache(raw ? JSON.parse(raw) : []);
+      const mine = (data.configuration.plugins || {})[PLUGIN_ID] || {};
+      return writeCache(mine.pages ? JSON.parse(mine.pages) : [], mine.prefs ? JSON.parse(mine.prefs) : {});
     } catch (e) { return readCache(); }
   }
-  async function savePages(list) {
+  // configurePlugin replaces the plugin's whole setting map: always send both settings together.
+  async function saveAll(list, prefs) {
     const clean = cleanPages(list);
-    await gql('mutation($id: ID!, $input: Map!) { configurePlugin(plugin_id: $id, input: $input) }', { id: PLUGIN_ID, input: { pages: JSON.stringify(clean) } });
-    return writeCache(clean);
+    const cleanP = cleanPrefs(prefs);
+    await gql('mutation($id: ID!, $input: Map!) { configurePlugin(plugin_id: $id, input: $input) }',
+      { id: PLUGIN_ID, input: { pages: JSON.stringify(clean), prefs: JSON.stringify(cleanP) } });
+    return writeCache(clean, cleanP);
   }
 
   // ---------- the icon ----------
@@ -160,9 +209,12 @@
       };
       const openPanel = (anchor) => {
         if (panel) { closePanel(); return; }
-        const entries = mergeEntries(registered, readCache());
-        const link = (label, path) => {
-          const a = el('a', { className: 'dropdown-item', href: path, textContent: label });
+        const prefs = readPrefs();
+        const entries = mergeEntries(registered, readCache(), prefs.overrides);
+        const link = (label, path, icon) => {
+          const a = prefs.icons
+            ? el('a', { className: 'dropdown-item', href: path }, [iconNode(icon), el('span', { textContent: label })])
+            : el('a', { className: 'dropdown-item', href: path, textContent: label });
           a.addEventListener('click', (e) => {
             if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;  // let the browser open it in a new tab
             e.preventDefault(); closePanel(); go(path);
@@ -170,9 +222,9 @@
           return a;
         };
         panel = el('div', { className: 'dropdown-menu show spm-panel', role: 'menu' }, [
-          ...entries.map((e) => link(e.label, e.path)),
+          ...entries.map((e) => link(e.label, e.path, e.icon)),
           entries.length ? el('div', { className: 'dropdown-divider' }) : null,
-          link('Edit menu…', PAGE_PATH),
+          link('Edit menu…', PAGE_PATH, 'faPen'),
         ]);
         const pos = panelPlacement(anchor.getBoundingClientRect(), document.documentElement.clientWidth, document.documentElement.clientHeight);  // without the scrollbars: that is what position: fixed uses
         Object.entries({ top: pos.top, bottom: pos.bottom, left: pos.left, right: pos.right, width: pos.width, maxHeight: pos.maxHeight })
@@ -193,7 +245,7 @@
           return () => window.removeEventListener(EVENT, onChange);
         }, []);
         React.useEffect(() => { closePanel(); }, [location.pathname]);  // leaving a page closes the panel
-        const entries = mergeEntries(registered, readCache());
+        const entries = mergeEntries(registered, readCache(), readPrefs().overrides);
         const busy = registered.some((e) => { try { return e.badge && e.badge(); } catch (x) { return false; } });
         const here = entries.some((e) => location.pathname === e.path || location.pathname.startsWith(`${e.path}/`)) || location.pathname === PAGE_PATH;
         return React.createElement('div', { className: `nav-utility spm-menu${here ? ' active' : ''}` },
@@ -226,42 +278,125 @@
     return n;
   }
 
+  // A FontAwesome solid icon (by name) or an image (a path inside Stash) as a small node in front of a menu entry.
+  function iconNode(spec) {
+    if (typeof spec === 'string' && spec.startsWith('/')) return el('img', { className: 'spm-icon', src: spec, alt: '' });
+    const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
+    const def = lib[spec] || lib.faPuzzlePiece;
+    const d = def && def.icon && def.icon[4];
+    if (typeof d !== 'string') return el('span', { className: 'spm-icon' });
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'spm-icon');
+    svg.setAttribute('viewBox', `0 0 ${def.icon[0]} ${def.icon[1]}`);
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'currentColor');
+    svg.appendChild(path);
+    return svg;
+  }
+
+  // Read each enabled plugin's script and look for a page of its own (see detectPages). Disabled plugins and unreadable scripts: no page.
+  async function scanPlugins() {
+    const data = await gql('{ plugins { id name enabled paths { javascript } } }');
+    const found = await Promise.all(data.plugins.filter((p) => p.id !== PLUGIN_ID).map(async (p) => {
+      let pages = [];
+      if (p.enabled !== false) {
+        try {
+          const sources = await Promise.all(((p.paths && p.paths.javascript) || []).map((u) => {
+            const url = new URL(u, window.location.href);  // same origin whatever host Stash reports
+            return fetch(url.pathname + url.search).then((r) => (r.ok ? r.text() : ''));
+          }));
+          pages = detectPages(p.id, sources.join('\n'));
+        } catch (e) { /* unreadable script: no page found */ }
+      }
+      return { id: p.id, name: p.name, enabled: p.enabled !== false, pages };
+    }));
+    return found.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   async function renderPage(root) {
     root.replaceChildren(el('div', { className: 'spm-page', textContent: 'Loading…' }));
     let list = await loadFromStash(true);
+    let prefs = readPrefs();
+    let plugins = null;  // result of scanPlugins, null while it runs / when it failed
     const message = el('div', { className: 'spm-hint' });
     const listBox = el('div');
     const regBox = el('div');
     const pick = el('select', { className: 'form-control spm-grow' });
+    const onlyPages = el('input', { type: 'checkbox', checked: 'checked', onChange: () => fillPick() });
+    const iconsBox = el('input', { type: 'checkbox', onChange: () => save(list, { ...prefs, icons: iconsBox.checked }) });
     const labelInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: 'Name in the menu' });
     const pathInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: '/plugins/some-plugin' });
+    const iconNames = el('datalist', { id: 'spm-icon-names' });
     const say = (t) => { message.textContent = t; };
-    const save = async (next) => {
-      try { list = await savePages(next); say('Saved.'); draw(); } catch (e) { say(`Could not save: ${e.message}`); }
+    const save = async (nextList, nextPrefs) => {
+      try { list = await saveAll(nextList, nextPrefs); prefs = readPrefs(); say('Saved.'); } catch (e) { say(`Could not save: ${e.message}`); }
+      draw();
+    };
+    const field = (value, placeholder, onSave, extra) => {
+      const i = el('input', { type: 'text', className: `form-control ${extra || 'spm-grow'}`, placeholder, value });
+      i.addEventListener('change', () => onSave(i.value.trim()));
+      return i;
+    };
+    const iconField = (value, onSave) => {
+      const i = field(value, 'Icon (optional)', onSave, 'spm-icon-input');
+      i.setAttribute('list', 'spm-icon-names');
+      i.title = 'A FontAwesome name such as faBolt, or an image path inside Stash such as /plugin/my-plugin/assets/icon.png';
+      return i;
     };
     function draw() {
+      iconsBox.checked = prefs.icons;
+      const move = (i, to) => to >= 0 && to < list.length && save(list.map((_, j) => list[j === to ? i : j === i ? to : j]), prefs);
       listBox.replaceChildren(...(list.length ? list.map((x, i) => el('div', { className: 'spm-row' }, [
-        el('span', { className: 'spm-grow', textContent: `${x.label}  ·  ${x.path}` }),
-        el('button', { className: 'btn btn-secondary', textContent: '↑', title: 'Move up', onClick: () => i > 0 && save(list.map((_, j) => list[j === i - 1 ? i : j === i ? i - 1 : j])) }),
-        el('button', { className: 'btn btn-secondary', textContent: '↓', title: 'Move down', onClick: () => i < list.length - 1 && save(list.map((_, j) => list[j === i + 1 ? i : j === i ? i + 1 : j])) }),
-        el('button', { className: 'btn btn-danger', textContent: 'Remove', onClick: () => save(list.filter((_, j) => j !== i)) }),
+        field(x.label, 'Name in the menu', (v) => v && save(list.map((y, j) => (j === i ? { ...y, label: v } : y)), prefs)),
+        iconField(x.icon || '', (v) => save(list.map((y, j) => (j === i ? { label: y.label, path: y.path, ...(v ? { icon: v } : {}) } : y)), prefs)),
+        el('span', { className: 'spm-path', textContent: x.path }),
+        el('button', { className: 'btn btn-secondary', textContent: '↑', title: 'Move up', onClick: () => move(i, i - 1) }),
+        el('button', { className: 'btn btn-secondary', textContent: '↓', title: 'Move down', onClick: () => move(i, i + 1) }),
+        el('button', { className: 'btn btn-danger', textContent: 'Remove', onClick: () => save(list.filter((_, j) => j !== i), prefs) }),
       ])) : [el('div', { className: 'spm-hint', textContent: 'No entries of your own yet.' })]));
-      const reg = mergeEntries(registered, []);
-      regBox.replaceChildren(...(reg.length ? reg.map((e) => el('div', { className: 'spm-row', textContent: `${e.label}  ·  ${e.path}` }))
-        : [el('div', { className: 'spm-hint', textContent: 'No plugin has added itself.' })]));
+      const setOverride = (path, key, v) => {
+        const cur = { ...(prefs.overrides[path] || {}) };
+        if (v) cur[key] = v; else delete cur[key];
+        const overrides = { ...prefs.overrides };
+        if (cur.label || cur.icon) overrides[path] = cur; else delete overrides[path];
+        save(list, { ...prefs, overrides });
+      };
+      const reg = mergeEntries(registered, [], prefs.overrides);
+      regBox.replaceChildren(...(reg.length ? reg.map((e) => el('div', { className: 'spm-row' }, [
+        field((prefs.overrides[e.path] || {}).label || '', e.defaultLabel, (v) => setOverride(e.path, 'label', v)),
+        iconField((prefs.overrides[e.path] || {}).icon || '', (v) => setOverride(e.path, 'icon', v)),
+        el('span', { className: 'spm-path', textContent: e.path }),
+      ])) : [el('div', { className: 'spm-hint', textContent: 'No plugin has added itself.' })]));
+    }
+    function fillPick() {
+      if (!plugins) return;
+      const only = onlyPages.checked;
+      const options = [];
+      plugins.forEach((p) => {
+        if (only) p.pages.forEach((path) => options.push([path, `${p.name} (${path})`, p.name]));
+        else options.push([p.pages[0] || `/plugins/${p.id}`, `${p.name} (${p.id})${p.enabled ? '' : ' (disabled)'}`, p.name]);
+      });
+      pick.replaceChildren(el('option', { value: '', textContent: options.length ? 'Choose a plugin…' : 'No plugin with a page found' }),
+        ...options.map(([path, text, name]) => { const o = el('option', { value: path, textContent: text }); o.dataset.name = name; return o; }));
     }
     root.replaceChildren(el('div', { className: 'spm-page' }, [
       el('h2', { textContent: 'Plugin Menu' }),
-      el('div', { className: 'spm-hint', textContent: 'The icon next to Statistics opens a menu with the pages below. Stash does not say which plugins have a page of their own: pick the ones that do (a page lives at /plugins/<plugin id>, e.g. /plugins/stash-sense2).' }),
+      el('div', { className: 'spm-hint', textContent: 'The icon next to Statistics opens a menu with the pages below. Change a name or icon in its field; it is saved when you leave the field. An empty name field in the second list keeps the name the plugin chose.' }),
+      el('label', { className: 'spm-check' }, [iconsBox, el('span', { textContent: ' Show an icon in front of every entry' })]),
       el('h4', { textContent: 'Your entries' }), listBox,
       el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Add an installed plugin' }),
+        el('div', { className: 'spm-hint', textContent: 'Stash does not say which plugins have a page of their own. The list is made by reading each plugin\'s script for a page address: a good hint, not a guarantee.' }),
         el('div', { className: 'spm-row' }, [pick, el('button', { className: 'btn btn-primary', textContent: 'Add', onClick: () => {
           const o = pick.selectedOptions[0];
           if (!o || !o.value) return say('Pick a plugin first.');
           if (list.some((x) => x.path === o.value)) return say('Already in the menu.');
           if (list.length >= MAX_USER_ENTRIES) return say(`At most ${MAX_USER_ENTRIES} entries.`);
-          return save([...list, { label: o.dataset.name, path: o.value }]);
-        } })])]),
+          return save([...list, { label: o.dataset.name, path: o.value }], prefs);
+        } })]),
+        el('label', { className: 'spm-check' }, [onlyPages, el('span', { textContent: ' Only plugins with a page of their own' })])]),
       el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Or any page of Stash by its address' }),
         el('div', { className: 'spm-row' }, [labelInput, pathInput, el('button', { className: 'btn btn-primary', textContent: 'Add this address', onClick: () => {
           const label = labelInput.value.trim(); const path = pathInput.value.trim();
@@ -269,18 +404,18 @@
           if (cleanPages([{ label, path }]).length !== 1) return say('The address is a path inside Stash and starts with / (no host, no //).');
           if (list.length >= MAX_USER_ENTRIES) return say(`At most ${MAX_USER_ENTRIES} entries.`);
           labelInput.value = ''; pathInput.value = '';
-          return save([...list, { label, path }]);
+          return save([...list, { label, path }], prefs);
         } })])]),
       message,
       el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Added by plugins themselves' }), regBox]),
+      iconNames,
     ]));
     draw();
-    try {
-      const data = await gql('{ plugins { id name } }');
-      pick.replaceChildren(el('option', { value: '', textContent: 'Choose a plugin…' }), ...data.plugins
-        .filter((p) => p.id !== PLUGIN_ID).sort((a, b) => a.name.localeCompare(b.name))
-        .map((p) => { const o = el('option', { value: `/plugins/${p.id}`, textContent: `${p.name} (${p.id})` }); o.dataset.name = p.name; return o; }));
-    } catch (e) { pick.replaceChildren(el('option', { value: '', textContent: 'Plugin list not available' })); }
+    pick.replaceChildren(el('option', { value: '', textContent: 'Checking the plugins…' }));
+    const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
+    iconNames.replaceChildren(...Object.keys(lib).filter((k) => /^fa[A-Z]/.test(k) && lib[k] && lib[k].icon).sort().map((k) => el('option', { value: k })));
+    try { plugins = await scanPlugins(); fillPick(); }
+    catch (e) { pick.replaceChildren(el('option', { value: '', textContent: 'Plugin list not available' })); }
   }
 
   let mountToken = 0;

@@ -12,7 +12,9 @@ One icon in Stash's top bar (right of *Statistics*) with a floating menu of your
 2. Stash > *Settings > Plugins > Reload plugins*, then reload the page (Ctrl+F5).
 3. Open `/plugins/stash-plugin-menu` (the puzzle icon > *Edit menu…*, or type the address) and add your plugin pages.
 
-Stash does not tell which plugins have a page of their own, so you pick the installed plugins that do (a page lives at `/plugins/<plugin id>`, e.g. `/plugins/stash-sense2`), or enter any address inside Stash by hand. Addresses must start with `/` (no host, no `//`); at most 12 entries of your own.
+Stash does not tell which plugins have a page of their own, so the editor reads each enabled plugin's script and lists those that register a page (`register.route(...)`) or live at `/plugins/<plugin id>` -- a good hint, not a guarantee; a checkbox shows all plugins. You can also enter any address inside Stash by hand. Addresses must start with `/` (no host, no `//`); at most 12 entries of your own.
+
+**Names and icons:** every entry can be renamed on the editor page, your own ones and those added by plugins (an empty name keeps the plugin's own). Tick *Show an icon in front of every entry* to show icons; each entry can have one: a [FontAwesome](https://fontawesome.com/icons) solid icon name such as `faBolt`, or an image path inside Stash. Without an icon a puzzle piece is shown.
 
 ## For plugin authors
 
@@ -25,6 +27,7 @@ window.__stashPluginMenuQueue.push({
   label: 'My Plugin',
   path: '/plugins/my-plugin', // a path inside Stash
   order: 10,                  // optional, smaller first (default 100)
+  icon: 'faBolt',             // optional: FontAwesome solid icon name or an image path inside Stash (shown when the user turns icons on)
   badge: () => isBusy(),      // optional: true puts a dot on the icon; call window.StashPluginMenu?.refresh() when it changes
 });
 ```

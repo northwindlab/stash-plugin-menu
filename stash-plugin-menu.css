@@ -9,7 +9,11 @@
 .spm-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0; flex-wrap: wrap; }
 .spm-row .spm-grow { flex: 1 1 12rem; }
 .spm-section { margin-top: 1.5rem; }
+.spm-row .spm-icon-input { flex: 0 1 11rem; }
+.spm-row .spm-path { flex: 0 1 auto; opacity: 0.65; font-size: 0.85em; word-break: break-all; }
+.spm-check { display: block; margin: 0.5rem 0; cursor: pointer; }
 
 /* The floating panel: plain DOM on <body>, fixed under the icon (placement computed in the script); Bootstrap's dropdown classes give it the theme's look. */
 .spm-panel { position: fixed !important; transform: none !important; margin: 0; z-index: 2000; overflow-y: auto; overflow-x: hidden; }
 .spm-panel .dropdown-item { white-space: normal; padding: 0.55rem 1rem; }
+.spm-panel .spm-icon { width: 1.1em; height: 1.1em; margin-right: 0.6rem; vertical-align: -0.2em; object-fit: contain; }
