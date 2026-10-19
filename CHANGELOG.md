@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0
+- Own images as icons: the upload button (⬆) next to the icon field scales an image down to a small PNG (at most 64 px, under 8 KB) and stores it in the setting; no external image addresses. A path inside Stash typed into the field still works.
+
 ## 0.3.1
 - Icon field: clicking into it opens a grid of the icons themselves (filter by typing), instead of a plain list of names; the chosen icon is previewed next to the field.
 

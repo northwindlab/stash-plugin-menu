@@ -17,16 +17,19 @@
   const PREFS_KEY = 'spm:prefs';
   const MAX_USER_ENTRIES = 12;
   const MAX_OVERRIDES = 50;
+  const MAX_DATA_ICON = 8000;  // characters of an uploaded icon (a small PNG as a data: address)
 
   // ---------- pure helpers (tested in tests/test_menu.js) ----------
 
   const isPath = (p) => typeof p === 'string' && /^\/[A-Za-z0-9/_.\-?=&#%]*$/.test(p) && !p.includes('//');
 
-  // An icon is the name of a FontAwesome solid icon (faBolt) or an image path inside Stash (/plugin/x/assets/icon.png); anything else: none.
+  // An icon is the name of a FontAwesome solid icon (faBolt), an image path inside Stash (/plugin/x/assets/icon.png) or a small
+  // uploaded PNG (data:image/png;base64,...); anything else (other hosts, other data types): none.
   function cleanIcon(v) {
     if (typeof v !== 'string') return undefined;
     const s = v.trim();
-    return /^fa[A-Z][A-Za-z0-9]*$/.test(s) || isPath(s) ? s : undefined;
+    if (/^fa[A-Z][A-Za-z0-9]*$/.test(s) || isPath(s)) return s;
+    return s.length <= MAX_DATA_ICON && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(s) ? s : undefined;
   }
 
   function cleanPages(list) {
@@ -126,7 +129,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.3.1', register, refresh };
+  window.StashPluginMenu = { version: '0.4.0', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -280,7 +283,7 @@
 
   // A FontAwesome solid icon (by name) or an image (a path inside Stash) as a small node in front of a menu entry.
   function iconNode(spec) {
-    if (typeof spec === 'string' && spec.startsWith('/')) return el('img', { className: 'spm-icon', src: spec, alt: '' });
+    if (typeof spec === 'string' && (spec.startsWith('/') || spec.startsWith('data:'))) return el('img', { className: 'spm-icon', src: spec, alt: '' });
     const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
     const def = lib[spec] || lib.faPuzzlePiece;
     const d = def && def.icon && def.icon[4];
@@ -306,33 +309,76 @@
     return iconNameCache;
   }
 
-  // Icon field with a grid of the icons themselves (a <datalist> cannot show pictures): click into the field, type to filter, click an icon.
-  // A path (starts with /) or an empty field: no grid. The grid shows at most PICKER_MAX icons.
+  // An image file -> a small square PNG (data: address) that fits MAX_DATA_ICON: 64, then 48, then 32 pixels.
+  function imageToIcon(file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type)) { reject(new Error('That is not an image.')); return; }
+      if (file.size > 2 * 1024 * 1024) { reject(new Error('The image is larger than 2 MB.')); return; }
+      const reader = new FileReader();  // Stash's CSP allows data: images but not blob: ones
+      reader.onerror = () => reject(new Error('Could not read the file.'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const w = img.naturalWidth || img.width; const h = img.naturalHeight || img.height;
+          if (!w || !h) { reject(new Error('Could not read the size of the image.')); return; }
+          for (const size of [64, 48, 32]) {
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            const k = Math.min(size / w, size / h);
+            c.getContext('2d').drawImage(img, (size - w * k) / 2, (size - h * k) / 2, w * k, h * k);
+            const d = c.toDataURL('image/png');
+            if (d.length <= MAX_DATA_ICON) { resolve(d); return; }
+          }
+          reject(new Error('The image is too detailed for an icon; try a simpler one.'));
+        };
+        img.onerror = () => reject(new Error('Could not read the image.'));
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Icon field: a grid of the icons themselves (a <datalist> cannot show pictures) -- click into the field, type to filter, click an icon --
+  // plus an upload button for an own image. A path (starts with /) or an uploaded image: no grid. The grid shows at most PICKER_MAX icons.
   const PICKER_MAX = 96;
-  function iconPicker(value, onSave) {
-    const input = el('input', { type: 'text', className: 'form-control', placeholder: 'Icon (optional)', value });
-    input.title = 'A FontAwesome name such as faBolt (click to pick one), or an image path inside Stash such as /plugin/my-plugin/assets/icon.png';
+  const UPLOADED = '(uploaded image)';
+  function iconPicker(value, onSave, onError) {
+    let current = cleanIcon(value) || '';
+    const input = el('input', { type: 'text', className: 'form-control', placeholder: 'Icon (optional)' });
+    input.value = current.startsWith('data:') ? UPLOADED : current;
+    input.title = 'A FontAwesome name such as faBolt (click to pick one), an image path inside Stash such as /plugin/my-plugin/assets/icon.png, or upload an image';
     const preview = el('span', { className: 'spm-picker-preview' });
     const grid = el('div', { className: 'spm-picker-grid dropdown-menu show' });
     grid.hidden = true;
-    const showPreview = () => { const v = cleanIcon(input.value); preview.replaceChildren(v ? iconNode(v) : el('span', { className: 'spm-icon' })); };
+    const file = el('input', { type: 'file', accept: 'image/*' });
+    file.hidden = true;
+    const typed = () => (input.value.trim() === UPLOADED ? current : input.value.trim());
+    const showPreview = () => { const v = cleanIcon(typed()); preview.replaceChildren(v ? iconNode(v) : el('span', { className: 'spm-icon' })); };
     const fill = () => {
       const q = input.value.trim().toLowerCase();
-      if (q.startsWith('/')) { grid.hidden = true; return; }
+      if (q.startsWith('/') || q.startsWith('(')) { grid.hidden = true; return; }
       const hits = iconNameList().filter((n) => n.toLowerCase().includes(q)).slice(0, PICKER_MAX);
       grid.replaceChildren(...(hits.length ? hits.map((n) => el('button', { type: 'button', className: 'spm-pick', title: n, onMouseDown: (e) => {
         e.preventDefault();  // keep the focus in the field: no blur / change before the pick
-        input.value = n; grid.hidden = true; showPreview(); onSave(n);
+        current = n; input.value = n; grid.hidden = true; showPreview(); onSave(n);
       } }, [iconNode(n)])) : [el('div', { className: 'spm-hint', textContent: 'No icon with that name.' })]));
       grid.hidden = false;
     };
-    input.addEventListener('focus', fill);
+    input.addEventListener('focus', () => { if (input.value === UPLOADED) input.select(); else fill(); });
     input.addEventListener('input', () => { showPreview(); fill(); });
     input.addEventListener('blur', () => { grid.hidden = true; });
     input.addEventListener('keydown', (e) => { if (e.key === 'Escape') grid.hidden = true; });
-    input.addEventListener('change', () => onSave(input.value.trim()));
+    input.addEventListener('change', () => { current = typed(); onSave(current); });
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0];
+      file.value = '';
+      if (!f) return;
+      try { current = await imageToIcon(f); input.value = UPLOADED; showPreview(); onSave(current); } catch (e) { onError(e.message); }
+    });
     showPreview();
-    return el('div', { className: 'spm-picker spm-icon-input' }, [preview, input, grid]);
+    return el('div', { className: 'spm-picker spm-icon-input' }, [preview, input,
+      el('button', { type: 'button', className: 'btn btn-secondary', textContent: '⬆', title: 'Upload an image as the icon (scaled down to at most 64 px)', onClick: () => file.click() }),
+      file, grid]);
   }
 
   // Read each enabled plugin's script and look for a page of its own (see detectPages). Disabled plugins and unreadable scripts: no page.
@@ -377,7 +423,7 @@
       i.addEventListener('change', () => onSave(i.value.trim()));
       return i;
     };
-    const iconField = iconPicker;
+    const iconField = (value, onSave) => iconPicker(value, onSave, say);
     function draw() {
       iconsBox.checked = prefs.icons;
       const move = (i, to) => to >= 0 && to < list.length && save(list.map((_, j) => list[j === to ? i : j === i ? to : j]), prefs);

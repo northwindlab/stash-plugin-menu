@@ -1,6 +1,6 @@
 name: Plugin Menu
 description: One icon in Stash's top bar (next to Statistics) with a floating menu of your plugin pages -- instead of one top-bar entry per plugin.
-version: 0.3.1
+version: 0.4.0
 url: https://github.com/northwindlab/stash-plugin-menu
 
 settings:
