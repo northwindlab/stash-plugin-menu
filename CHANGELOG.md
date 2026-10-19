@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1
+- Icon field: clicking into it opens a grid of the icons themselves (filter by typing), instead of a plain list of names; the chosen icon is previewed next to the field.
+
 ## 0.3.0
 - Rename every entry: your own ones in their name field, entries added by plugins in the second list (an empty field keeps the plugin's name).
 - Optional icon in front of every entry (setting "Show an icon in front of every entry"); an icon is a FontAwesome name (`faBolt`) or an image path inside Stash, set per entry in the editor or passed by a plugin as `icon`.

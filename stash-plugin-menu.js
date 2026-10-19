@@ -126,7 +126,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.3.0', register, refresh };
+  window.StashPluginMenu = { version: '0.3.1', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -297,6 +297,44 @@
     return svg;
   }
 
+  let iconNameCache = null;
+  function iconNameList() {
+    if (!iconNameCache) {
+      const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
+      iconNameCache = Object.keys(lib).filter((k) => /^fa[A-Z]/.test(k) && lib[k] && lib[k].icon).sort();
+    }
+    return iconNameCache;
+  }
+
+  // Icon field with a grid of the icons themselves (a <datalist> cannot show pictures): click into the field, type to filter, click an icon.
+  // A path (starts with /) or an empty field: no grid. The grid shows at most PICKER_MAX icons.
+  const PICKER_MAX = 96;
+  function iconPicker(value, onSave) {
+    const input = el('input', { type: 'text', className: 'form-control', placeholder: 'Icon (optional)', value });
+    input.title = 'A FontAwesome name such as faBolt (click to pick one), or an image path inside Stash such as /plugin/my-plugin/assets/icon.png';
+    const preview = el('span', { className: 'spm-picker-preview' });
+    const grid = el('div', { className: 'spm-picker-grid dropdown-menu show' });
+    grid.hidden = true;
+    const showPreview = () => { const v = cleanIcon(input.value); preview.replaceChildren(v ? iconNode(v) : el('span', { className: 'spm-icon' })); };
+    const fill = () => {
+      const q = input.value.trim().toLowerCase();
+      if (q.startsWith('/')) { grid.hidden = true; return; }
+      const hits = iconNameList().filter((n) => n.toLowerCase().includes(q)).slice(0, PICKER_MAX);
+      grid.replaceChildren(...(hits.length ? hits.map((n) => el('button', { type: 'button', className: 'spm-pick', title: n, onMouseDown: (e) => {
+        e.preventDefault();  // keep the focus in the field: no blur / change before the pick
+        input.value = n; grid.hidden = true; showPreview(); onSave(n);
+      } }, [iconNode(n)])) : [el('div', { className: 'spm-hint', textContent: 'No icon with that name.' })]));
+      grid.hidden = false;
+    };
+    input.addEventListener('focus', fill);
+    input.addEventListener('input', () => { showPreview(); fill(); });
+    input.addEventListener('blur', () => { grid.hidden = true; });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') grid.hidden = true; });
+    input.addEventListener('change', () => onSave(input.value.trim()));
+    showPreview();
+    return el('div', { className: 'spm-picker spm-icon-input' }, [preview, input, grid]);
+  }
+
   // Read each enabled plugin's script and look for a page of its own (see detectPages). Disabled plugins and unreadable scripts: no page.
   async function scanPlugins() {
     const data = await gql('{ plugins { id name enabled paths { javascript } } }');
@@ -329,7 +367,6 @@
     const iconsBox = el('input', { type: 'checkbox', onChange: () => save(list, { ...prefs, icons: iconsBox.checked }) });
     const labelInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: 'Name in the menu' });
     const pathInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: '/plugins/some-plugin' });
-    const iconNames = el('datalist', { id: 'spm-icon-names' });
     const say = (t) => { message.textContent = t; };
     const save = async (nextList, nextPrefs) => {
       try { list = await saveAll(nextList, nextPrefs); prefs = readPrefs(); say('Saved.'); } catch (e) { say(`Could not save: ${e.message}`); }
@@ -340,12 +377,7 @@
       i.addEventListener('change', () => onSave(i.value.trim()));
       return i;
     };
-    const iconField = (value, onSave) => {
-      const i = field(value, 'Icon (optional)', onSave, 'spm-icon-input');
-      i.setAttribute('list', 'spm-icon-names');
-      i.title = 'A FontAwesome name such as faBolt, or an image path inside Stash such as /plugin/my-plugin/assets/icon.png';
-      return i;
-    };
+    const iconField = iconPicker;
     function draw() {
       iconsBox.checked = prefs.icons;
       const move = (i, to) => to >= 0 && to < list.length && save(list.map((_, j) => list[j === to ? i : j === i ? to : j]), prefs);
@@ -408,12 +440,9 @@
         } })])]),
       message,
       el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Added by plugins themselves' }), regBox]),
-      iconNames,
     ]));
     draw();
     pick.replaceChildren(el('option', { value: '', textContent: 'Checking the plugins…' }));
-    const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
-    iconNames.replaceChildren(...Object.keys(lib).filter((k) => /^fa[A-Z]/.test(k) && lib[k] && lib[k].icon).sort().map((k) => el('option', { value: k })));
     try { plugins = await scanPlugins(); fillPick(); }
     catch (e) { pick.replaceChildren(el('option', { value: '', textContent: 'Plugin list not available' })); }
   }
