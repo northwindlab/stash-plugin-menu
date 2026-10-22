@@ -3,13 +3,14 @@
 .spm-menu .btn { position: relative; }
 .spm-dot { position: absolute; top: 0.35em; right: 0.2em; width: 0.55em; height: 0.55em; border-radius: 50%; background: #f5a623; }
 .spm-dot[hidden] { display: none; }
-.spm-page { max-width: 46rem; margin: 1rem auto; }
+.spm-page { max-width: 64rem; margin: 1rem auto; }
 .spm-page h2 { margin-bottom: 0.5rem; }
 .spm-page .spm-hint { opacity: 0.75; font-size: 0.9em; margin: 0.25rem 0 0.75rem; }
 .spm-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0; flex-wrap: wrap; }
 .spm-row .spm-grow { flex: 1 1 12rem; }
 .spm-section { margin-top: 1.5rem; }
 .spm-row .spm-icon-input { flex: 0 1 13rem; }
+.spm-actions { display: flex; gap: 0.25rem; flex: none; }
 .spm-icon { width: 1.1em; height: 1.1em; object-fit: contain; vertical-align: -0.2em; }
 .spm-picker { position: relative; display: flex; align-items: center; gap: 0.5rem; }
 .spm-picker-preview { flex: none; width: 1.3em; text-align: center; }
@@ -20,7 +21,9 @@
 .spm-pick { background: transparent; border: 0; color: inherit; height: 2.2rem; border-radius: 0.25rem; cursor: pointer; }
 .spm-pick:hover { background: rgba(128, 128, 128, 0.35); }
 .spm-pick .spm-icon { width: 1.2em; height: 1.2em; margin: 0; }
-.spm-row .spm-path { flex: 0 1 auto; opacity: 0.65; font-size: 0.85em; word-break: break-all; }
+.spm-row .spm-path { flex: 1 1 12rem; opacity: 0.65; font-size: 0.85em; word-break: break-all; }
+.spm-row .spm-target { flex: 1 1 14rem; }
+.spm-off { opacity: 0.55; }
 .spm-check { display: block; margin: 0.5rem 0; cursor: pointer; }
 
 /* The floating panel: plain DOM on <body>, fixed under the icon (placement computed in the script); Bootstrap's dropdown classes give it the theme's look. */

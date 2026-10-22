@@ -4,6 +4,7 @@
  *  - Entries come from two places: plugins that register themselves (see "For plugin authors" in the README: push {id, label, path, badge?}
  *    to window.__stashPluginMenuQueue or call window.StashPluginMenu.register -- works whichever plugin loads first) and the entries the user
  *    adds on the page /plugins/stash-plugin-menu (stored as JSON in this plugin's own Stash setting `pages`).
+ *  - A target is a path inside Stash or an http(s) address elsewhere (a sidecar, another machine): the latter opens in a new tab.
  *  - A click opens a floating panel (fixed under the icon): the entries, then "Edit menu..." -- which is all there is while nothing is registered.
  *  - A registered `badge: () => boolean` puts a dot on the icon while it returns true (call window.StashPluginMenu.refresh() when it changes).
  */
@@ -17,11 +18,16 @@
   const PREFS_KEY = 'spm:prefs';
   const MAX_USER_ENTRIES = 12;
   const MAX_OVERRIDES = 50;
+  const MAX_ORDER = 100;
   const MAX_DATA_ICON = 8000;  // characters of an uploaded icon (a small PNG as a data: address)
 
   // ---------- pure helpers (tested in tests/test_menu.js) ----------
 
   const isPath = (p) => typeof p === 'string' && /^\/[A-Za-z0-9/_.\-?=&#%]*$/.test(p) && !p.includes('//');
+  // A target outside Stash (a sidecar, a container on another machine): http(s) only, no user:password@ in front of the host.
+  const isUrl = (u) => typeof u === 'string' && u.length <= 300
+    && /^https?:\/\/[^\s/?#@\\'"<>]+(?:[/?#][A-Za-z0-9\-._~:/?#\[\]!$&'()*+,;=%]*)?$/i.test(u);
+  const isTarget = (t) => isPath(t) || isUrl(t);
 
   // An icon is the name of a FontAwesome solid icon (faBolt), an image path inside Stash (/plugin/x/assets/icon.png) or a small
   // uploaded PNG (data:image/png;base64,...); anything else (other hosts, other data types): none.
@@ -35,38 +41,47 @@
   function cleanPages(list) {
     if (!Array.isArray(list)) return [];
     return list
-      .filter((x) => x && typeof x.label === 'string' && x.label.trim() && isPath(x.path))
+      .filter((x) => x && typeof x.label === 'string' && x.label.trim() && isTarget(x.path))
       .map((x) => { const icon = cleanIcon(x.icon); return { label: x.label.trim().slice(0, 40), path: x.path, ...(icon ? { icon } : {}) }; })
       .slice(0, MAX_USER_ENTRIES);
   }
 
-  // Settings: `icons` shows an icon in front of every entry; `overrides` renames (and gives an icon to) entries added by plugins, by path.
+  // Settings: `icons` shows an icon in front of every entry; `overrides` renames / re-icons / hides entries added by plugins, by target;
+  // `order` lists the targets of all entries in the order the user wants (entries not listed follow in the default order).
   function cleanPrefs(p) {
-    const out = { icons: false, overrides: {} };
+    const out = { icons: false, overrides: {}, order: [] };
     if (!p || typeof p !== 'object') return out;
     out.icons = p.icons === true;
     const o = p.overrides && typeof p.overrides === 'object' ? p.overrides : {};
     for (const path of Object.keys(o).slice(0, MAX_OVERRIDES)) {
-      if (!isPath(path)) continue;
+      if (!isTarget(path)) continue;
       const v = o[path] || {};
       const label = typeof v.label === 'string' ? v.label.trim().slice(0, 40) : '';
       const icon = cleanIcon(v.icon);
-      if (label || icon) out.overrides[path] = { ...(label ? { label } : {}), ...(icon ? { icon } : {}) };
+      const hidden = v.hidden === true;
+      if (label || icon || hidden) out.overrides[path] = { ...(label ? { label } : {}), ...(icon ? { icon } : {}), ...(hidden ? { hidden } : {}) };
     }
+    if (Array.isArray(p.order)) out.order = [...new Set(p.order.filter(isTarget))].slice(0, MAX_ORDER);
     return out;
   }
 
-  // Registered entries first (by `order`, then shown label), then the user's; a path is listed once (the registered entry wins).
-  // `overrides` (from cleanPrefs) rename / re-icon the registered entries; `defaultLabel` keeps the name the plugin gave.
-  function mergeEntries(registered, user, overrides) {
-    const ov = overrides || {};
-    const out = [];
+  // Registered entries first (by `order`, then shown label), then the user's; a target is listed once (the registered entry wins).
+  // `prefs` (from cleanPrefs): `overrides` rename / re-icon / hide the registered entries (`defaultLabel` keeps the plugin's name,
+  // `hidden` is only a flag: the caller leaves hidden entries out of the menu), `order` puts entries in the user's order.
+  function mergeEntries(registered, user, prefs) {
+    const ov = (prefs && prefs.overrides) || {};
+    const order = (prefs && prefs.order) || [];
+    let out = [];
     const seen = new Set();
     const reg = registered
-      .map((e) => ({ ...e, defaultLabel: e.label, label: (ov[e.path] && ov[e.path].label) || e.label, icon: (ov[e.path] && ov[e.path].icon) || e.icon }))
+      .map((e) => { const o = ov[e.path] || {}; return { ...e, defaultLabel: e.label, label: o.label || e.label, icon: o.icon || e.icon, hidden: o.hidden === true }; })
       .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.label.localeCompare(b.label));
     for (const e of reg) { if (!seen.has(e.path)) { seen.add(e.path); out.push({ ...e, source: 'plugin' }); } }
-    for (const e of user) { if (!seen.has(e.path)) { seen.add(e.path); out.push({ ...e, source: 'user' }); } }
+    for (const e of user) { if (!seen.has(e.path)) { seen.add(e.path); out.push({ ...e, source: 'user', hidden: false }); } }
+    if (order.length) {
+      const at = (path) => { const i = order.indexOf(path); return i < 0 ? Infinity : i; };
+      out = out.map((e, n) => [e, n]).sort((x, y) => (at(x[0].path) - at(y[0].path)) || (x[1] - y[1])).map((x) => x[0]);
+    }
     return out;
   }
 
@@ -117,7 +132,7 @@
     return { ...vertical, left: 'auto', right, width };
   }
 
-  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, insertUtilityItem, panelPlacement }; return; }
+  if (typeof module !== 'undefined' && module.exports) { module.exports = { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, isUrl, isTarget, insertUtilityItem, panelPlacement }; return; }
 
   // ---------- registry for other plugins ----------
 
@@ -136,7 +151,7 @@
     const q = window.__stashPluginMenuQueue;
     if (Array.isArray(q)) q.splice(0).forEach(register);
   }
-  window.StashPluginMenu = { version: '0.5.1', register, refresh };
+  window.StashPluginMenu = { version: '0.6.0', register, refresh };
   // From now on `push` registers at once (a plugin that loads after us can keep using the queue).
   window.__stashPluginMenuQueue = Object.assign(window.__stashPluginMenuQueue || [], { push: (...items) => { items.forEach(register); return items.length; } });
   drainQueue();
@@ -220,11 +235,18 @@
       const openPanel = (anchor) => {
         if (panel) { closePanel(); return; }
         const prefs = readPrefs();
-        const entries = mergeEntries(registered, readCache(), prefs.overrides);
+        const entries = mergeEntries(registered, readCache(), prefs).filter((e) => !e.hidden);
         const link = (label, path, icon) => {
+          const external = isUrl(path);  // outside Stash: a new tab, and a marker when there is no icon to show it
+          const shown = external && !prefs.icons ? `${label} ↗` : label;
           const a = prefs.icons
-            ? el('a', { className: 'dropdown-item', href: path }, [iconNode(icon), el('span', { textContent: label })])
-            : el('a', { className: 'dropdown-item', href: path, textContent: label });
+            ? el('a', { className: 'dropdown-item', href: path }, [iconNode(icon || defaultIconName(path)), el('span', { textContent: shown })])
+            : el('a', { className: 'dropdown-item', href: path, textContent: shown });
+          if (external) {
+            a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer');
+            a.addEventListener('click', () => closePanel());
+            return a;
+          }
           a.addEventListener('click', (e) => {
             if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;  // let the browser open it in a new tab
             e.preventDefault(); closePanel(); go(path);
@@ -255,7 +277,7 @@
           return () => window.removeEventListener(EVENT, onChange);
         }, []);
         React.useEffect(() => { closePanel(); }, [location.pathname]);  // leaving a page closes the panel
-        const entries = mergeEntries(registered, readCache(), readPrefs().overrides);
+        const entries = mergeEntries(registered, readCache(), readPrefs()).filter((e) => !e.hidden && !isUrl(e.path));
         const busy = registered.some((e) => { try { return e.badge && e.badge(); } catch (x) { return false; } });
         const here = entries.some((e) => location.pathname === e.path || location.pathname.startsWith(`${e.path}/`)) || location.pathname === PAGE_PATH;
         return React.createElement('div', { className: `nav-utility spm-menu${here ? ' active' : ''}` },
@@ -305,6 +327,13 @@
     path.setAttribute('fill', 'currentColor');
     svg.appendChild(path);
     return svg;
+  }
+
+  // The icon of an entry without one: only addresses outside Stash get a different one (an arrow out of a box); else the puzzle piece.
+  function defaultIconName(target) {
+    if (!isUrl(target)) return undefined;
+    const lib = (window.PluginApi && window.PluginApi.libraries && window.PluginApi.libraries.FontAwesomeSolid) || {};
+    return ['faUpRightFromSquare', 'faExternalLinkAlt', 'faArrowUpRightFromSquare'].find((n) => lib[n]);
   }
 
   let iconNameCache = null;
@@ -433,12 +462,11 @@
     let plugins = null;  // result of scanPlugins, null while it runs / when it failed
     const message = el('div', { className: 'spm-hint' });
     const listBox = el('div');
-    const regBox = el('div');
     const pick = el('select', { className: 'form-control spm-grow' });
     const onlyPages = el('input', { type: 'checkbox', checked: 'checked', onChange: () => fillPick() });
     const iconsBox = el('input', { type: 'checkbox', onChange: () => save(list, { ...prefs, icons: iconsBox.checked }) });
     const labelInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: 'Name in the menu' });
-    const pathInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: '/plugins/some-plugin' });
+    const pathInput = el('input', { type: 'text', className: 'form-control spm-grow', placeholder: '/plugins/some-plugin or https://host:port/' });
     const say = (t) => { message.textContent = t; };
     const save = async (nextList, nextPrefs) => {
       try { list = await saveAll(nextList, nextPrefs); prefs = readPrefs(); say('Saved.'); } catch (e) { say(`Could not save: ${e.message}`); }
@@ -450,30 +478,50 @@
       return i;
     };
     const iconField = (value, onSave) => iconPicker(value, onSave, say);
+    const TARGET_HINT = 'The address is a path inside Stash (starts with /) or a full http:// or https:// address (no user:password@).';
+    const everyEntry = () => mergeEntries(registered, list, prefs);
     function draw() {
       iconsBox.checked = prefs.icons;
-      const move = (i, to) => to >= 0 && to < list.length && save(list.map((_, j) => list[j === to ? i : j === i ? to : j]), prefs);
-      listBox.replaceChildren(...(list.length ? list.map((x, i) => el('div', { className: 'spm-row' }, [
-        field(x.label, 'Name in the menu', (v) => v && save(list.map((y, j) => (j === i ? { ...y, label: v } : y)), prefs)),
-        iconField(x.icon || '', (v) => save(list.map((y, j) => (j === i ? { label: y.label, path: y.path, ...(v ? { icon: v } : {}) } : y)), prefs)),
-        el('span', { className: 'spm-path', textContent: x.path }),
-        el('button', { className: 'btn btn-secondary', textContent: '↑', title: 'Move up', onClick: () => move(i, i - 1) }),
-        el('button', { className: 'btn btn-secondary', textContent: '↓', title: 'Move down', onClick: () => move(i, i + 1) }),
-        el('button', { className: 'btn btn-danger', textContent: 'Remove', onClick: () => save(list.filter((_, j) => j !== i), prefs) }),
-      ])) : [el('div', { className: 'spm-hint', textContent: 'No entries of your own yet.' })]));
+      const entries = everyEntry();
+      const paths = entries.map((e) => e.path);
       const setOverride = (path, key, v) => {
         const cur = { ...(prefs.overrides[path] || {}) };
         if (v) cur[key] = v; else delete cur[key];
         const overrides = { ...prefs.overrides };
-        if (cur.label || cur.icon) overrides[path] = cur; else delete overrides[path];
+        if (cur.label || cur.icon || cur.hidden) overrides[path] = cur; else delete overrides[path];
         save(list, { ...prefs, overrides });
       };
-      const reg = mergeEntries(registered, [], prefs.overrides);
-      regBox.replaceChildren(...(reg.length ? reg.map((e) => el('div', { className: 'spm-row' }, [
-        field((prefs.overrides[e.path] || {}).label || '', e.defaultLabel, (v) => setOverride(e.path, 'label', v)),
-        iconField((prefs.overrides[e.path] || {}).icon || '', (v) => setOverride(e.path, 'icon', v)),
-        el('span', { className: 'spm-path', textContent: e.path }),
-      ])) : [el('div', { className: 'spm-hint', textContent: 'No plugin has added itself.' })]));
+      const editUser = (path, change) => save(list.map((y) => (y.path === path ? change(y) : y)), prefs);
+      const move = (i, to) => {
+        if (to < 0 || to >= paths.length) return;
+        const next = [...paths];
+        [next[i], next[to]] = [next[to], next[i]];
+        save(list, { ...prefs, order: next });
+      };
+      const changeTarget = (old, v) => {
+        if (v === old) return;
+        if (!isTarget(v)) { say(TARGET_HINT); draw(); return; }
+        if (paths.includes(v)) { say('Already in the menu.'); draw(); return; }
+        save(list.map((y) => (y.path === old ? { ...y, path: v } : y)), { ...prefs, order: prefs.order.map((p) => (p === old ? v : p)) });
+      };
+      listBox.replaceChildren(...(entries.length ? entries.map((e, i) => {
+        const mine = e.source === 'user';
+        const own = prefs.overrides[e.path] || {};
+        return el('div', { className: `spm-row${e.hidden ? ' spm-off' : ''}` }, [
+          mine ? field(e.label, 'Name in the menu', (v) => v && editUser(e.path, (y) => ({ ...y, label: v })))
+            : field(own.label || '', e.defaultLabel, (v) => setOverride(e.path, 'label', v)),
+          mine ? iconField(e.icon || '', (v) => editUser(e.path, (y) => { const { icon, ...rest } = y; return v ? { ...rest, icon: v } : rest; }))
+            : iconField(own.icon || '', (v) => setOverride(e.path, 'icon', v)),
+          mine ? field(e.path, '/plugins/x or https://host:port/', (v) => changeTarget(e.path, v), 'spm-target')
+            : el('span', { className: 'spm-path', title: 'Added by a plugin: its address cannot be changed here', textContent: `${e.path} (plugin)` }),
+          el('div', { className: 'spm-actions' }, [
+            el('button', { className: 'btn btn-secondary', textContent: '↑', title: 'Move up', onClick: () => move(i, i - 1) }),
+            el('button', { className: 'btn btn-secondary', textContent: '↓', title: 'Move down', onClick: () => move(i, i + 1) }),
+            mine ? el('button', { className: 'btn btn-danger', textContent: 'Remove', onClick: () => save(list.filter((y) => y.path !== e.path), { ...prefs, order: prefs.order.filter((p) => p !== e.path) }) })
+              : el('button', { className: 'btn btn-secondary', textContent: e.hidden ? 'Show' : 'Hide', title: 'A plugin adds this entry itself, so it can only be hidden', onClick: () => setOverride(e.path, 'hidden', !e.hidden) }),
+          ]),
+        ]);
+      }) : [el('div', { className: 'spm-hint', textContent: 'No entries yet.' })]));
     }
     function fillPick() {
       if (!plugins) return;
@@ -488,30 +536,30 @@
     }
     root.replaceChildren(el('div', { className: 'spm-page' }, [
       el('h2', { textContent: 'Plugin Menu' }),
-      el('div', { className: 'spm-hint', textContent: 'The icon next to Statistics opens a menu with the pages below. Change a name or icon in its field; it is saved when you leave the field. An empty name field in the second list keeps the name the plugin chose.' }),
+      el('div', { className: 'spm-hint', textContent: 'The icon next to Statistics opens a menu with the entries below. Change a name, icon or address in its field; it is saved when you leave the field. Entries marked (plugin) were added by a plugin: you can rename, re-icon, move and hide them (an empty name keeps the plugin\'s). Addresses outside Stash open in a new tab.' }),
       el('label', { className: 'spm-check' }, [iconsBox, el('span', { textContent: ' Show an icon in front of every entry' })]),
-      el('h4', { textContent: 'Your entries' }), listBox,
+      el('h4', { textContent: 'Menu entries' }), listBox,
       el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Add an installed plugin' }),
         el('div', { className: 'spm-hint', textContent: 'Stash does not say which plugins have a page of their own. The list is made by reading each plugin\'s script for a page address: a good hint, not a guarantee.' }),
         el('div', { className: 'spm-row' }, [pick, el('button', { className: 'btn btn-primary', textContent: 'Add', onClick: () => {
           const o = pick.selectedOptions[0];
           if (!o || !o.value) return say('Pick a plugin first.');
-          if (list.some((x) => x.path === o.value)) return say('Already in the menu.');
+          if (everyEntry().some((x) => x.path === o.value)) return say('Already in the menu.');
           if (list.length >= MAX_USER_ENTRIES) return say(`At most ${MAX_USER_ENTRIES} entries.`);
           return save([...list, { label: o.dataset.name, path: o.value }], prefs);
         } })]),
         el('label', { className: 'spm-check' }, [onlyPages, el('span', { textContent: ' Only plugins with a page of their own' })])]),
-      el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Or any page of Stash by its address' }),
+      el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Or any address: a page of Stash, or a sidecar / another server' }),
         el('div', { className: 'spm-row' }, [labelInput, pathInput, el('button', { className: 'btn btn-primary', textContent: 'Add this address', onClick: () => {
           const label = labelInput.value.trim(); const path = pathInput.value.trim();
           if (!label || !path) return say('Enter a name and an address.');
-          if (cleanPages([{ label, path }]).length !== 1) return say('The address is a path inside Stash and starts with / (no host, no //).');
+          if (cleanPages([{ label, path }]).length !== 1) return say(TARGET_HINT);
+          if (everyEntry().some((x) => x.path === path)) return say('Already in the menu.');
           if (list.length >= MAX_USER_ENTRIES) return say(`At most ${MAX_USER_ENTRIES} entries.`);
           labelInput.value = ''; pathInput.value = '';
           return save([...list, { label, path }], prefs);
         } })])]),
       message,
-      el('div', { className: 'spm-section' }, [el('h4', { textContent: 'Added by plugins themselves' }), regBox]),
     ]));
     draw();
     pick.replaceChildren(el('option', { value: '', textContent: 'Checking the plugins…' }));

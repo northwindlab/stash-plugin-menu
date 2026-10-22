@@ -1,11 +1,11 @@
 // Tests for the pure parts of stash-plugin-menu.js (list cleaning, merging registered + user entries, inserting next to Statistics).
 // Run:  node tests/test_menu.js
-const { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
+const { cleanPages, cleanPrefs, cleanIcon, mergeEntries, detectPages, normalizeImageUrl, isUrl, isTarget, insertUtilityItem, panelPlacement } = require('../stash-plugin-menu.js');
 let fails = 0;
 const check = (name, ok) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}`); if (!ok) fails += 1; };
 
 check('keeps a good entry, trims the label', JSON.stringify(cleanPages([{ label: ' Sense ', path: '/plugins/stash-sense2' }])) === '[{"label":"Sense","path":"/plugins/stash-sense2"}]');
-check('drops host, scheme, protocol-relative, relative paths', cleanPages([{ label: 'x', path: 'https://evil.example/' }, { label: 'x', path: '//evil.example' }, { label: 'x', path: 'plugins/a' }, { label: 'x', path: 'javascript:alert(1)' }]).length === 0);
+check('drops protocol-relative, relative, script and other schemes', cleanPages([{ label: 'x', path: '//evil.example' }, { label: 'x', path: 'plugins/a' }, { label: 'x', path: 'javascript:alert(1)' }, { label: 'x', path: 'ftp://h/x' }, { label: 'x', path: 'data:text/html,x' }]).length === 0);
 check('drops empty labels and non-objects', cleanPages([{ label: ' ', path: '/a' }, null, 5, 'x']).length === 0);
 check('not a list -> empty', cleanPages('x').length === 0 && cleanPages(null).length === 0);
 check('at most 12', cleanPages(Array.from({ length: 20 }, (_, i) => ({ label: `p${i}`, path: `/p${i}` }))).length === 12);
@@ -26,10 +26,10 @@ check('github.com raw / blob addresses go to raw.githubusercontent.com', normali
 check('other addresses stay as they are', normalizeImageUrl('https://example.com/github.com/u/r/raw/x.png') === 'https://example.com/github.com/u/r/raw/x.png'
   && normalizeImageUrl('https://github.com/u/r') === 'https://github.com/u/r' && normalizeImageUrl('https://github.com.evil.example/u/r/raw/m/i.png') === 'https://github.com.evil.example/u/r/raw/m/i.png');
 check('entry keeps a valid icon, drops a bad one', cleanPages([{ label: 'a', path: '/a', icon: 'faBolt' }, { label: 'b', path: '/b', icon: 'javascript:1' }]).map((e) => e.icon).join(',') === 'faBolt,');
-check('prefs: defaults', JSON.stringify(cleanPrefs(null)) === '{"icons":false,"overrides":{}}' && cleanPrefs('x').icons === false);
+check('prefs: defaults', JSON.stringify(cleanPrefs(null)) === '{"icons":false,"overrides":{},"order":[]}' && cleanPrefs('x').icons === false);
 check('prefs: icons only when exactly true', cleanPrefs({ icons: true }).icons === true && cleanPrefs({ icons: 'yes' }).icons === false);
-check('prefs: overrides cleaned (bad path / empty entries dropped, label trimmed)', JSON.stringify(cleanPrefs({ overrides: { '/a': { label: ' New ', icon: 'faBolt' }, 'https://x': { label: 'x' }, '/b': {}, '/c': null, '/d': { icon: 'nope' } } }).overrides) === '{"/a":{"label":"New","icon":"faBolt"}}');
-const renamed = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }], { '/plugins/c': { label: 'Aardvark', icon: 'faBolt' } });
+check('prefs: overrides cleaned (bad path / empty entries dropped, label trimmed)', JSON.stringify(cleanPrefs({ overrides: { '/a': { label: ' New ', icon: 'faBolt' }, 'ftp://x': { label: 'x' }, '/b': {}, '/c': null, '/d': { icon: 'nope' } } }).overrides) === '{"/a":{"label":"New","icon":"faBolt"}}');
+const renamed = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }], { overrides: { '/plugins/c': { label: 'Aardvark', icon: 'faBolt' } } });
 check('rename: the shown label wins, sorting follows it, default kept', renamed.map((e) => e.label).join(',') === 'Alpha,Aardvark,Beta,Mine' && renamed.find((e) => e.path === '/plugins/c').defaultLabel === 'Gamma' && renamed.find((e) => e.path === '/plugins/c').icon === 'faBolt');
 check('no overrides: as before', mergeEntries(reg, []).map((e) => e.label).join(',') === 'Alpha,Beta,Gamma');
 check('detect: register.route path', detectPages('x', 'PluginApi.register.route("/my-page", Comp)').join() === '/my-page' && detectPages('x', "register . route('/a/b', C)").join() === '/a/b');
@@ -37,6 +37,21 @@ check('detect: own /plugins/<id> address', detectPages('stash-sense2', "path = '
 check('detect: another plugin\'s address with the same prefix is not a hit', detectPages('stash-sense', "/plugins/stash-sense2").length === 0);
 check('detect: nothing, dynamic or foreign paths -> none', detectPages('a', 'console.log(1)').length === 0 && detectPages('a', 'register.route(`/x/${id}`, C)').length === 0 && detectPages('a', 'register.route("https://evil.example", C)').length === 0);
 check('detect: regex characters in an id are harmless', detectPages('a.b', '/plugins/aXb').length === 0 && detectPages('a.b', '/plugins/a.b').length === 1);
+
+// targets outside Stash (a sidecar, another machine)
+check('isUrl: http(s) with host, port, path, query', ['http://sidecar.local:8080', 'https://side.example/menu?x=1#top', 'http://[2001:db8::1]:9000/a', 'http://nas.local/a%20b'].every(isUrl));
+check('isUrl: no other scheme, no credentials, no spaces/quotes/backslash, no host-less', ['ftp://h/x', 'javascript:alert(1)', 'https://user:pw@h/x', 'http://', 'https://h/a b', 'https://h"x', 'https://h\\x', '//h/x', 'https://h/<x>'].every((u) => !isUrl(u)));
+check('isUrl: too long is refused', !isUrl(`https://h/${'a'.repeat(300)}`));
+check('isTarget: path or URL', isTarget('/plugins/a') && isTarget('https://h:1/x') && !isTarget('plugins/a') && !isTarget(null));
+check('entries may have a URL as target; a URL is kept unchanged', JSON.stringify(cleanPages([{ label: ' Side ', path: 'https://side.example:8443/menu?a=1' }])) === '[{"label":"Side","path":"https://side.example:8443/menu?a=1"}]');
+check('prefs: override for a URL target and hidden flag kept; hidden only when exactly true', JSON.stringify(cleanPrefs({ overrides: { 'https://h/x': { label: 'N' }, '/a': { hidden: true }, '/b': { hidden: 'yes' } } }).overrides) === '{"https://h/x":{"label":"N"},"/a":{"hidden":true}}');
+check('prefs: order cleaned (bad targets and duplicates dropped, capped)', JSON.stringify(cleanPrefs({ order: ['/a', 'x', '/a', 'https://h/x', 5] }).order) === '["/a","https://h/x"]' && cleanPrefs({ order: Array.from({ length: 300 }, (_, i) => `/p${i}`) }).order.length === 100 && cleanPrefs({ order: 'x' }).order.length === 0);
+const hid = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }], { overrides: { '/plugins/b': { hidden: true } } });
+check('hidden: flagged, still listed (the caller filters), user entries never hidden', hid.find((e) => e.path === '/plugins/b').hidden === true && hid.length === 4 && hid.find((e) => e.path === '/mine').hidden === false);
+const ordered = mergeEntries(reg, [{ label: 'Mine', path: '/mine' }, { label: 'Side', path: 'https://h/x' }], { order: ['/mine', '/plugins/c'] });
+check('order: listed targets first in that order, the rest in the default order', ordered.map((e) => e.label).join(',') === 'Mine,Gamma,Alpha,Beta,Side');
+check('order: unknown targets are ignored', mergeEntries(reg, [], { order: ['/nope'] }).map((e) => e.label).join(',') === 'Alpha,Beta,Gamma');
+check('order and rename work together', mergeEntries(reg, [], { order: ['/plugins/c'], overrides: { '/plugins/c': { label: 'Zed' } } })[0].label === 'Zed');
 
 const Fragment = Symbol('Fragment');
 const React = {

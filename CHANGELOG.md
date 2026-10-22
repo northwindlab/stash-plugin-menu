@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0
+- Targets outside Stash: an entry can point to any `http://` or `https://` address (a sidecar, a container on another machine); it opens in a new tab, and the menu marks it with an arrow (or the arrow icon when icons are on). No `user:password@` in the address, no other schemes.
+- One list for all entries on the editor page. Entries added by a plugin (for example the Release Manager) are edited like your own: name, icon, position; since the plugin adds them itself they can be hidden (and shown again) instead of removed. Your own entries now also have an editable address and can be moved among the plugin entries.
+- New in the setting `prefs`: `order` (the order of all entries) and `hidden` (per plugin entry).
+
 ## 0.5.1
 - Image addresses of the form `github.com/<user>/<repo>/raw/...` (or `/blob/...`) are loaded from `raw.githubusercontent.com`: the github.com address redirects without a CORS header, so the browser could not read it.
 
